@@ -414,3 +414,67 @@ transporte). Pendiente: revisión del plan de implementación por etapas antes
 de comenzar a programar. Una vez aprobado, se implementará incrementalmente en
 `milestone-07` con commits pequeños, comprobando build + single-player +
 documentación en cada etapa. No se tocará `main` ni se iniciará M08.
+
+---
+
+## 18. Avance de implementación
+
+### Etapa 1 — Servidor de signaling (terminada, commit `7fed4fb`)
+
+Servidor mínimo de signaling en `signaling/server.mjs` (única dependencia:
+`ws`). Empareja un máximo de 2 participantes por sala, genera códigos de 6
+caracteres y retransmite señales arbitrarias (SDP/ICE) de forma opaca. El
+servidor no conoce el estado de juego.
+
+Validación: prueba extremo a extremo con dos clientes WebSocket reales
+(8 comprobaciones PASS): crear sala, unirse, rechazo de tercer participante,
+retransmisión de oferta/respuesta/ICE en ambos sentidos, aviso de salida y
+limpieza de la sala al desconectarse.
+
+### Etapa 2 — Capa de protocolo y transporte WebRTC (terminada)
+
+Nueva carpeta `src/network/` con cuatro archivos (`protocol.ts`,
+`NetworkTransport.ts`, `SignalingClient.ts`, `RtcPeerTransport.ts`).
+
+- **protocol.ts**: serialización y validación. Distingue los mensajes de
+  *signaling* (`create`, `join`, `signal`, `created`, `joined`, `peer-joined`,
+  `peer-left`, `error`) de los mensajes P2P (`player_connected`,
+  `player_state`, `player_disconnected`, `chat`). Los mensajes recibidos se
+  validan antes de usarse (tipos conocidos, ids no vacíos, número de
+  coordenadas acotado, nombres/chat dentro de longitud máxima). El peer no se
+  considera de fiar.
+- **NetworkTransport.ts**: interfaz que la capa de sesión/gameplay usará
+  (`connect()`, `send()`, `close()` + eventos `onOpen/onMessage/onClose/
+  onError`). Oculta por completo WebRTC: la UI y la sesión no verán jamás un
+  `RTCPeerConnection` o un `RTCDataChannel`.
+- **SignalingClient.ts**: cliente del servidor de la Etapa 1. Conecta, crea
+  sala (`createRoom()`), se une (`joinRoom(code)`) y reenvía señales. La URL
+  por defecto se deriva del host servidor (`ws(s)://hostname:8787`) y es
+  configurable por constructor. Estados: idle/connecting/connected/closed.
+- **RtcPeerTransport.ts**: implementa la interfaz usando solo las APIs WebRTC
+  del navegador, sin librerías externas. El host crea el `offer` y el
+  `RTCDataChannel`; el visitor responde con `answer`. El canal de datos se
+  llama `game-net`. STUN público configurado; TURN explícitamente fuera de M07.
+  Maneja errores básicos: servidor inaccesible, sala no encontrada, negociación
+  fallida (timeout 15 s), peer desconectado. El cierre local no dispara `onClose`.
+
+Validación en Node (harness temporal, ya eliminado): el servidor real de la
+Etapa 1 + dos instancias de `RtcPeerTransport` con un mock fiel de las APIs
+WebRTC del navegador. 12 comprobaciones PASS: `connect()` rechaza con servidor
+inaccesible; crear y unirse a sala reales; rechazo de sala inexistente;
+negociación completa host/visitor; `RTCDataChannel` abierto en ambos lados;
+recepción de `player_state` en un sentido y de `chat` en el otro; mensaje
+inválido ignorado; cierre del visitor detectado por el host; estados correctos;
+arranque del servidor. **Advertencia honesta**: al no disponer de navegador en
+este entorno, la negociación se verificó con mocks; la validación en navegador
+real forma parte de M07-A/B/C.
+
+También comprobado: `npm run build` (TypeScript strict + Vite) sin errores. El
+single-player no depende de la red (`src/network/` no se importa desde ninguna
+escena todavía).
+
+### Etapa 3 en adelante — pendiente
+
+`NetworkSession` (orquestador que consume `NetworkTransport`), la
+`RemotePlayer` y su integración en `RoomScene`, y la UI (menú de conexión y
+chat) consumiendo únicamente `NetworkSession`. Sin cambios en `main`.
