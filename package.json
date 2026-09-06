@@ -1,16 +1,19 @@
 {
   "name": "nuestro-cuarto",
   "version": "1.0.0",
-  "description": "",
-  "main": "app.js",
+  "description": "Nuestro Cuartito, un espacio virtual 2D acogedor.",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node node_modules/vite/bin/vite.js",
+    "build": "node node_modules/typescript/bin/tsc && node node_modules/vite/bin/vite.js build",
+    "preview": "node node_modules/vite/bin/vite.js preview"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "dependencies": {
+    "phaser": "^4.2.1"
+  },
   "devDependencies": {
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vite": "^8.2.2"
   }
 }
