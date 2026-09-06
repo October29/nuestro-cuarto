@@ -2,6 +2,10 @@ import Phaser from 'phaser';
 
 import { RoomScene } from './scenes/RoomScene';
 
+export const ROOM_WIDTH = 1200;
+export const ROOM_HEIGHT = 800;
+export const PLAYER_SPEED = 260;
+
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',

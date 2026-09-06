@@ -1,27 +1,62 @@
 import Phaser from 'phaser';
 
+import { ROOM_HEIGHT, ROOM_WIDTH } from '../config';
+import { Player, PlayerInput } from '../entities/Player';
+
+interface WasdKeys {
+  W: Phaser.Input.Keyboard.Key;
+  A: Phaser.Input.Keyboard.Key;
+  S: Phaser.Input.Keyboard.Key;
+  D: Phaser.Input.Keyboard.Key;
+}
+
 export class RoomScene extends Phaser.Scene {
+  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private wasd!: WasdKeys;
+  private player!: Player;
+
   constructor() {
     super('room');
   }
 
   create(): void {
-    const { width, height } = this.scale.gameSize;
+    const floorY = 420;
 
-    const floorY = 400;
+    this.add.rectangle(0, 0, ROOM_WIDTH, floorY, 0x182238).setOrigin(0, 0);
+    this.add.rectangle(0, floorY, ROOM_WIDTH, ROOM_HEIGHT - floorY, 0x3c292c).setOrigin(0, 0);
 
-    this.add.rectangle(0, 0, width, floorY, 0x182238).setOrigin(0, 0);
-    this.add.rectangle(0, floorY, width, height - floorY, 0x3c292c).setOrigin(0, 0);
-
-    this.windowAt(120, 90);
-    this.add.ellipse(width / 2, height - 70, 620, 180, 0x714c4c);
+    this.windowAt(120, 80);
+    this.add.ellipse(ROOM_WIDTH / 2, ROOM_HEIGHT - 60, 640, 190, 0x714c4c);
 
     this.add
-      .text(width / 2, height - 24, 'Nuestro cuartito 🌙', {
+      .text(ROOM_WIDTH / 2, ROOM_HEIGHT - 26, 'Nuestro cuartito 🌙', {
         fontSize: '22px',
         color: '#d8deff',
       })
       .setOrigin(0.5);
+
+    this.cursors = this.input.keyboard!.createCursorKeys();
+    this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as WasdKeys;
+
+    this.player = new Player(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 110);
+
+    this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+  }
+
+  update(_time: number, delta: number): void {
+    this.player.update(delta, this.getPlayerInput());
+  }
+
+  private getPlayerInput(): PlayerInput {
+    const { up, down, left, right } = this.cursors;
+
+    return {
+      up: up.isDown || this.wasd.W.isDown,
+      down: down.isDown || this.wasd.S.isDown,
+      left: left.isDown || this.wasd.A.isDown,
+      right: right.isDown || this.wasd.D.isDown,
+    };
   }
 
   private windowAt(x: number, y: number): void {
