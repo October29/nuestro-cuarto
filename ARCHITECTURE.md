@@ -220,6 +220,23 @@ Esta estructura es una referencia y puede cambiar cuando las necesidades reales 
 
 ---
 
+Espacio físico (colisiones)
+
+Cada obstáculo implementa la interfaz `Obstacle` (`getCollisionRect(): Phaser.Geom.Rectangle`).
+
+El `CollisionSystem` almacena esos rectángulos y resuelve cada paso de movimiento
+con separación de ejes (X luego Y), conservando la componente libre cuando un
+movimiento diagonal choca parcialmente. El límite de la habitación se mantiene
+mediante `clampInsideRoom` (no se duplica como cuatro obstáculos).
+
+El collider del Player es configurable y es más pequeño que su dibujo visual, para
+que la navegación se sienta cercana y natural.
+
+Este sistema es estático y puramente local: no busca rutas, no calcula
+pathfinding, no hay gravedad ni simulación de físicas.
+
+---
+
 Regla de arquitectura
 
 La arquitectura debe responder a las necesidades reales del proyecto.

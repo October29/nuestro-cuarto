@@ -20,6 +20,8 @@ Prototipo jugable
 - [x] Añadir cámara.
 - [x] Crear límites de la habitación.
 - [ ] Colisiones del escenario (zonas transitables y objetos).
+- [ ] Deslizamiento sobre obstáculos (colisiones con sofá y paredes).
+- [ ] Validación del punto de salida frente a obstáculos.
 - [ ] Crear sistema básico de interacción.
 - [ ] Convertir algunos elementos de la habitación en objetos interactivos.
 - [ ] Movimiento por click a una posición del suelo.

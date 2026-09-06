@@ -24,11 +24,17 @@ export class InteractionSystem {
     this.promptText.setOrigin(0.5, 1);
     this.promptText.setVisible(false);
     this.promptText.setScrollFactor(0);
+    this.promptText.setDepth(10);
     this.promptText.setPosition(400, 560);
   }
 
   addInteractable(interactable: Interactable): void {
     this.interactables.push(interactable);
+  }
+
+  /** Punto de salida del interactuable sobre el que el Player está sentado, si existe. */
+  getSeatedExitPoint(): { x: number; y: number } | null {
+    return this.seatedInteractable ? this.seatedInteractable.getExitPoint() : null;
   }
 
   update(): void {
