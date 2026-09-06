@@ -8,6 +8,10 @@ El historial detallado de código se encuentra en Git.
 
 [Unreleased]
 
+Closed
+
+- Milestone 06 (colisiones y deslizamiento) **cerrado**: validado visualmente en navegador (Android/escritorio) y aprobado. Las tareas correspondientes de `TODO.md` quedan completadas y el milestone se integra en `main` mediante merge commit. No se inicia M07.
+
 Added
 
 - Documento "AGENTS.md" con las instrucciones para agentes de IA.

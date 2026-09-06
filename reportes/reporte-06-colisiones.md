@@ -239,13 +239,12 @@ Cada caso: el lado elegido coincide con la distancia más corta al extremo libre
 
 `npm run dev --port 5199` ejecutado: Vite responde HTTP 200, entrega `index.html` y módulos TypeScript correctamente. El servidor de desarrollo funciona sin errores.
 
-### Verificación visual pendiente
+### Verificación visual
 
-Las pruebas visuales en navegador real (Android/escritorio) quedan pendientes: deslizamiento continuo, comportamiento de cámara, interacción E/click tras colisión, etc. Las tareas de `TODO.md` no se marcan completadas hasta esa verificación.
+La validación visual en navegador real (Android/escritorio) fue **aprobada** por el usuario: deslizamiento continuo alrededor del sofá, comportamiento de cámara, interacción E/click tras colisión y ajuste del punto de salida funcionan según lo esperado. Con esta aprobación se cierra el milestone 06.
 
 ## 14. Pendientes conocidos
 
-- Verificación visual completa en Android/escritorio.
 - Depth sorting por Y para que el Personaje se renderice correctamente detrás y delante de muebles según su posición vertical: en M06 se hizo un ajuste mínimo (`player.setDepth(1)`, `promptText.setDepth(10)`) para que el jugador esté encima del sofá, pero no se implementa un sistema completo de ordenación por profundidad.
 - Anclaje del Player al sofá al sentarse (snapping a una posición relativa al sillón en lugar de quedarse donde estaba): es un comportamiento futuro, no M06.
 - Cambio del texto del prompt durante el estado sentado (p. ej. `[E] Levantarse`): documentado como pendiente en M04.
