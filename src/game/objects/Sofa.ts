@@ -31,6 +31,11 @@ export class Sofa implements Interactable {
     return 'Sentarse';
   }
 
+  getExitPoint(): { x: number; y: number } {
+    const gap = 30;
+    return { x: this.container.x, y: this.container.y + this.container.height / 2 + gap };
+  }
+
   onInteract(actor: InteractionActor): void {
     actor.setSitting(true);
   }

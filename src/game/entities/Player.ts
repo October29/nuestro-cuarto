@@ -71,6 +71,12 @@ export class Player extends Phaser.GameObjects.Container implements InteractionA
     this.clampInsideRoom();
   }
 
+  standUpAt(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+    this.setSitting(false);
+  }
+
   isSitting(): boolean {
     return this.sitting;
   }

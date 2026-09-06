@@ -20,6 +20,11 @@ Changed
   - Nuevo contrato `InteractionActor` (`setSitting`) que desacopla `Sofa` de `Player`.
   - `Interactable.onInteract(actor)` ahora depende de `InteractionActor` (elimina el cast en `Sofa`).
   - El estado sitting/standing pasa a ser responsabilidad exclusiva de `Player`; `InteractionSystem` ya no controla el levantamiento al detectar movimiento.
+- Milestone 04 (interacción): levantarse con `E` y punto de salida.
+  - Nuevo contrato `Interactable.getExitPoint()` para que cada interactuable defina su propia posición de salida.
+  - `Player.standUpAt(x, y)`: se mueve a la posición indicada y restaura el estado de pie.
+  - `InteractionSystem` recuerda el interactuable sobre el que el Player está sentado y, al pulsar `E` estando sentado, lo levanta en el punto de salida.
+  - `Sofa` sigue dependiendo solo de los contratos generales (no de `Player`); no se implementaron colisiones ni movimiento por click (M05/M06 quedan fuera).
 
 Planned
 

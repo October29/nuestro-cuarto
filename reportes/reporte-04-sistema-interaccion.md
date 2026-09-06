@@ -118,7 +118,7 @@ El resultado es determinista: con varios objetos dentro del radio se elige siemp
 3. Al pulsar `E`, `InteractionSystem` detecta `Phaser.Input.Keyboard.JustDown(interactKey)` y llama a `currentTarget.onInteract(this.player)`.
 4. En el sillón, `onInteract(actor)` llama a `actor.setSitting(true)` (el `actor` es el `Player`, que implementa `InteractionActor`).
 5. El jugador queda sentado: no se desplaza mientras no haya movimiento.
-6. `InteractionSystem` no interviene en el estado: simplemente sigue mostrando la indicación mientras haya un objetivo dentro del radio (pulsar `E` estando ya sentado es un no-op porque `setSitting(true)` está protegido por `if (this.sitting === sitting) return`).
+6. `InteractionSystem` no interviene en el estado de pie/sentado del Player; simplemente sigue mostrando la indicación mientras haya un objetivo dentro del radio. Estando sentado, pulsar `E` levanta al jugador (ver §13).
 
 ## 7. Cómo funciona el estado standing/sitting
 
@@ -161,7 +161,7 @@ El resultado es determinista: con varios objetos dentro del radio se elige siemp
 - El jugador se "sienta en su sitio actual" al pulsar `E`, no se ancla aún a la posición del sillón (snapping opcional futuro).
 - No se muestra resaltado del objeto objetivo (solo el texto `[E] Sentarse`); se puede añadir en una iteración posterior.
 - La indicación de interacción está fija en pantalla; en móvil habrá que reposicionarla (controles táctiles y UI quedan para más adelante).
-- Como efecto de la corrección, mientras el jugador está sentado junto al sillón la indicación `[E] Sentarse` sigue mostrándose (el sistema funciona por proximidad y no controla el estado del Player). Pulsar `E` en ese caso es un no-op. Validar en la revisión visual si este comportamiento es el deseado.
+- Como el sistema funciona por proximidad y no controla el estado del Player, mientras el jugador está sentado junto al sillón la indicación `[E] Sentarse` sigue mostrándose. En ese estado, pulsar `E` ya **no** es un no-op: levanta al jugador (ver §13). Validar en la revisión visual si la etiqueta del prompt debería cambiar cuando el jugador está sentado (p. ej. `[E] Levantarse`); por ahora se mantiene `[E] Sentarse` por simplicidad.
 
 ## 12. Cómo verificarlo visualmente en Android
 
@@ -174,4 +174,55 @@ El resultado es determinista: con varios objetos dentro del radio se elige siemp
    - Aléjate: la indicación desaparece.
    - Pulsa `E` cerca del sillón: el jugador cambia a la pose sentada (cabeza baja, cuerpo compacto).
    - Pulsa cualquier dirección (WASD o flechas): el jugador vuelve a la pose de pie y se mueve en esa dirección en el mismo instante.
+   - Estando sentado, pulsa `E` de nuevo: el jugador debe levantarse y aparecer **delante** del sillón (fuera de su espacio visual), sin comenzar a caminar mientras no pulses una dirección.
    - El movimiento y los límites de la habitación siguen funcionando igual que en el milestone 03.
+
+## 13. Ajuste final: levantarse con `E` y punto de salida
+
+### Nuevo comportamiento
+
+Antes, estando sentado, pulsar `E` era un no-op (el contrato `setSitting` protegía contra repetir el mismo estado). Ahora, cuando el Player está sentado:
+
+- al pulsar `E`, se levanta;
+- aparece en una posición de salida válida **delante del sillón** (fuera del espacio visual ocupado por el sofá);
+- restaura su visual de pie;
+- no comienza a caminar automáticamente (solo se mueve si el usuario pulsa una dirección en un frame posterior).
+
+Estando sentado, levantarse con WASD/flechas sigue funcionando exactamente igual que antes (lo gestiona `Player.update()`).
+
+### Cómo se determina el punto de salida
+
+El punto de salida lo define el propio interactuable. Se añadió el método `getExitPoint(): { x: number; y: number }` al contrato `Interactable`. El `Sofa` lo implementa devolviendo un punto por delante (debajo) de su caja visual:
+
+```
+exitPoint = { x: sofa.x, y: sofa.y + altura/2 + hueco }
+```
+
+Con `altura = 50` y `hueco = 30`, el punto de salida queda 55 px por debajo del centro del sofá (25 de media altura + 30 de hueco). Al estar el Player de pie situado ahí, su cuerpo queda por completo fuera del footprint visual del sofá, dando la espalda a este (el Player "mira" hacia el frente/bajo de la pantalla). No se modela todavía orientación explícita porque el placeholder no tiene sistema de facing.
+
+### Qué objeto es responsable de definirlo
+
+`Sofa` (vía `getExitPoint()`). El `Player`, `RoomScene` e `InteractionSystem` **no** contienen coordenadas del sofá ni condiciones `if (sofá)`.
+
+### Cómo se mantiene la separación Player / Sofa / InteractionSystem
+
+- **`Sofa`** define su propia posición de salida y sigue dependiendo solo de los contratos `Interactable` e `InteractionActor`; no importa `Player`.
+- **`Player`** gana el método `standUpAt(x, y)` que se mueve a la posición recibida y restaura el estado de pie (el Player sigue siendo el dueño de su estado y su visual). No conoce a `Sofa`.
+- **`InteractionSystem`** recuerda, de forma genérica, el interactuable sobre el que el Player está sentado (`seatedInteractable: Interactable | null`). Cuando el Player está sentado y pulsa `E`, pregunta a ese interactuable por su `getExitPoint()` y delega el movimiento + cambio de estado en `player.standUpAt(...)`. No contiene lógica específica de `Sofa`.
+- **`RoomScene`** no cambió su carga: crea las piezas y las conecta; no contiene lógica de `sitting` ni del sofá.
+
+### Qué NO se implementó (explícitamente fuera de alcance)
+
+- **No** se implementaron colisiones, hitboxes, física ni áreas bloqueadas (según la decisión del proyecto, eso es Milestone 06).
+- **No** se implementó el movimiento/interacción por click (Milestone 05).
+- **No** se implementó pathfinding ni navegación (queda después de Milestone 06).
+- **No** se solucionó el problema de profundidad (el sofá puede pintarse encima del Player); queda para un milestone posterior de mundo/profundidad.
+- **No** se añadió `Furniture`, `Chair`, etc. ni una jerarquía de muebles.
+
+### Resultado de `npm run build`
+
+`npm run build` completado correctamente: TypeScript sin errores y build de Vite correcto (11 módulos transformados). El warning de >500 kB es el habitual por incluir Phaser.
+
+### Pendiente de verificación visual del usuario
+
+Queda pendiente la verificación visual final en Android/escritorio: confirmar que al pulsar `E` estando sentado el Player aparece delante del sofá, no encima de él, y no camina solo. Esta última comprobación la realizará el usuario (no se verificó en navegador real desde CLI). El Milestone 04 no se marca como aprobado hasta esa validación.

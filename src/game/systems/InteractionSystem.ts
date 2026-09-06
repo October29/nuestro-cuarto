@@ -8,6 +8,7 @@ export class InteractionSystem {
   private player: Player;
   private interactables: Interactable[] = [];
   private currentTarget: Interactable | null = null;
+  private seatedInteractable: Interactable | null = null;
   private interactKey: Phaser.Input.Keyboard.Key;
   private promptText: Phaser.GameObjects.Text;
 
@@ -32,10 +33,23 @@ export class InteractionSystem {
 
   update(): void {
     this.detectNearest();
+
+    if (this.player.isSitting()) {
+      this.updatePrompt();
+      if (this.seatedInteractable && Phaser.Input.Keyboard.JustDown(this.interactKey)) {
+        const exit = this.seatedInteractable.getExitPoint();
+        this.player.standUpAt(exit.x, exit.y);
+      }
+      return;
+    }
+
     this.updatePrompt();
 
     if (this.currentTarget && Phaser.Input.Keyboard.JustDown(this.interactKey)) {
       this.currentTarget.onInteract(this.player);
+      if (this.player.isSitting()) {
+        this.seatedInteractable = this.currentTarget;
+      }
     }
   }
 
