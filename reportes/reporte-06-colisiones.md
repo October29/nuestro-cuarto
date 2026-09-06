@@ -91,26 +91,43 @@ Ejemplo concreto de lo que ocurre manteniendo ↑ debajo del sofá:
                                    ↓
 ```
 
-El Player mantiene la intención ↑. El desplazamiento lateral (+X) es consecuencia local de la geometría del obstáculo, no de una ruta calculada.
+El Player mantiene la intención ↑. El desplazamiento lateral es consecuencia local de la geometría del obstáculo, no de una ruta calculada. El lado por el que se desliza se elige por proximidad (ver §7): si el Player está más cerca del extremo izquierdo del bloque, se desliza a la izquierda; si está más cerca del extremo derecho, a la derecha.
 
 ### Comportamiento diagonal
 
-Un movimiento diagonal ∗ que alcanza un borde conserva la componente libre. Si Y está bloqueada, X sigue aplicándose, produciendo deslizamiento natural a lo largo del borde sin necesitar la lógica de desempate.
+Un movimiento diagonal que alcanza un borde conserva la componente libre. Si Y está bloqueada, X sigue aplicándose, produciendo deslizamiento natural a lo largo del borde sin necesitar la lógica de selección de lado.
 
 ### Deslizamiento por clic (sin desempate)
 
 El movimiento por clic usa `slideOnBlock=false`: conserva la componente libre (component conservation), pero no busca desplazamiento lateral adicional. Si un paso queda completamente bloqueado, se descarta el destino y el Player se detiene.
 
-## 7. Criterio de desempate
+## 7. Selección del lado de deslizamiento
 
-Cuando la dirección cardinal queda bloqueada sin componente perpendicular:
+Cuando la dirección cardinal queda bloqueada sin componente perpendicular, `resolveStep` identifica el obstáculo que bloquea (`findBlockingObstacle`) y compara la distancia desde la posición actual del collider hasta cada extremo lateral **libre**:
 
-- **Primaria vertical (↑ o ↓)**: deslizamiento hacia **+X** (derecha).
-- **Primaria horizontal (← o →)**: deslizamiento hacia **+Y** (abajo).
+- **Primaria vertical (↑ o ↓)**: se compara el extremo izquierdo con el derecho.
+  ```ts
+  distLeft  = |playerX - (obstacle.left  - halfWidth )|
+  distRight = |playerX - (obstacle.right + halfWidth )|
+  ```
+  `obstacle.left - halfWidth` y `obstacle.right + halfWidth` son las posiciones del centro del collider en las que el Player queda **completamente fuera** del AABB (su lateral toca el borde del obstáculo). Se elige el lado con menor `dist`; el Player se desliza hacia él.
+- **Primaria horizontal (← o →)**: se comparan los extremos superior e inferior.
+  ```ts
+  distTop    = |playerY - (obstacle.top    - halfHeight)|
+  distBottom = |playerY - (obstacle.bottom + halfHeight)|
+  ```
+  Se elige el lado con menor `dist` (el collider incluye su semialtura para quedar fuera del AABB).
 
-Es un criterio fijo, determinista, O(1), sin aleatoriedad ni búsqueda. No se prueban ambos lados; el lado se decide por la regla y se aplica si está libre. Si el lado de desempate también está bloqueado, el Player se detiene (no hay exploración de alternativas).
+### Empate
 
-La elección de **derecha** y **abajo** como lados fijos coincide con la convención de los ejes positivos del mundo de juego (→ +X, ↓ +Y), y produce traces de navegación predecibles alrededor de muebles.
+Si las distancias a ambos lados son iguales, se conserva el desempate determinista del deslizamiento:
+
+- Primaria vertical → **+X** (derecha).
+- Primaria horizontal → **+Y** (abajo).
+
+### Lado preferido ocupado
+
+Si el lado con menor distancia está ocupado (otro obstáculo o no hay espacio), se intenta el **lado contrario**. Si ambos están ocupados, el Player se detiene. Esto sigue siendo O(1): solo se evalúan los dos extremos de un único obstáculo, sin búsqueda ni lookahead.
 
 ## 8. Integración con movimiento por teclado
 
@@ -175,31 +192,48 @@ Cada paso se evalúa de forma aislada (posición actual + paso deseado). No hay 
 
 ### Simulación Node (lógica desacoplada de Phaser)
 
-Se reimplementó el algoritmo `resolveStep` y `isBlocked` en un script Node con los datos reales del sofá (bloque `[540,660]×[540,600]`, collider 10×14, paso 4.33 px/frame) y se ejecutaron los siguientes escenarios:
+Se reimplementó el algoritmo `resolveStep` / `findBlockingObstacle` en un script Node con los datos reales del sofá (bloque `[540,660]×[540,600]`, collider 10×14, paso 4.33 px/frame) y se ejecutaron los siguientes escenarios (tras la corrección de la selección del lado por distancia):
 
-**A — Mantener ↑ debajo del sofá:**
-El Player llega flush contra el borde inferior (y ≈ 615), luego se desliza a la derecha (+X) mientras ↑ sigue bloqueado verticalmente, hasta pasar la esquina derecha (x ≈ 673), donde ↑ vuelve a ser libre y el Player continúa subiendo. Comportamiento exacto del §8.
+**A — Mantener ↑ debajo del sofá, desde el centro (600,660):**
+El Player llega flush contra el borde inferior (y ≈ 615). Distancias iguales a ambos lados (70 px) → desempate +X → se desliza a la derecha hasta pasar la esquina derecha (x ≈ 673,7) y continúa subiendo.
 
 **B — Mantener ← contra el lado derecho:**
-El Player golpea la pared del sofá desde la derecha, se desliza hacia abajo (+Y, desempate) hasta limpiar el borde inferior (y ≈ 614), y continua moviéndose a la izquierda debajo del sofá. Trace-around completo.
+Según la altura de partida, el deslizamiento elige el extremo más cercano: cerca del borde superior se desliza hacia arriba (T4); cerca del inferior, hacia abajo (T5). En ambos casos, al limpiar el borde del sofá, ← sigue aplicándose.
 
 **C — Mantener ↓ desde arriba:**
-El Player golpea el borde superior, se desliza a la derecha (+X) hasta pasar la esquina superior derecha, y continúa descendiendo. Trace-around completo.
+Elige el extremo horizontal más cercano: desde la derecha del centro se desliza a la derecha (640,470 → x ≈ 670,3); desde la izquierda, a la izquierda (560,470 → x ≈ 529,7). Tras pasar la esquina, continúa descendiendo.
 
 **D — Diagonal ↗ hacia la esquina superior derecha:**
-La componente Y bloqueada al golpear el borde inferior; la componente X libre se conserva (deslizamiento natural por la geometría, sin desempate). Llega a un punto superior-derecha del cuarto. Component conservation funciona correctamente.
+La componente Y bloqueada al golpear el borde inferior; la componente X libre se conserva (deslizamiento natural por la geometría, sin selección de lado). Component conservation correcta.
 
 **E — Clic directamente hacia arriba detrás del sofá (target 600→300):**
-El Player se detiene al golpear la pared inferior (y ≈ 615) en 8 frames. El destino se cancela. No hay envoltura ni auto-ruta. Comportamiento correcto: detención local ante obstáculo.
+El Player se detiene al golpear la pared inferior (y ≈ 615) en 9 frames y cancela el destino. No hay envoltura ni auto-ruta. El clic no usa deslizamiento por lado (`slideOnBlock=false`).
 
 **F — Clic diagonal ↗ hacia un destino detrás del sofá (target 720, 350 desde 520, 660):**
-El Player se desliza a lo largo del borde inferior hacia la derecha (component conservation), cruza la esquina, y llega al destino en 154 frames. Esto es resolución local reactiva (el vector de movimiento apunta siempre al destino; cuando Y está bloqueado, X se aplica), no pathfinding. Comportamiento documentado.
+Component conservation reactiva; no es pathfinding. El clic no usa deslizamiento por lado.
 
 **G — Punto de salida bloqueado por otro obstáculo ficticio:**
-`findSafePosition(600,640, from=(600,614))` → converge a la posición sentada (600,614) tras los 8 pasos, porque el obstáculo ficticio bloquea el exitPoint y todos los puntos intermedios. Nunca se teletransporta al obstáculo.
+`findSafePosition(600,640, from=(600,614))` → converge a la posición sentada (600,614), nunca al obstáculo ficticio.
 
 **H — Punto de salida dentro del bloque del sofá (centro):**
-`findSafePosition(600,570, from=(600,614))` → converge a la posición sentada (600,614) porque el centro del sofá (570) está bloqueado por el propio obstáculo del sofá.
+`findSafePosition(600,570, from=(600,614))` → converge a la posición sentada (600,614).
+
+### Corrección M06 (selección del lado por distancia local)
+
+Se detectó que el deslizamiento siempre rodeaba los obstáculos por el lado fijo (derecha/abajo) incluso estando mucho más cerca del lado contrario. Se corrigió `resolveStep` para que elija el lado del AABB con menor distancia lateral desde la posición actual del collider. Matriz de casos verificados en Node (mismos datos reales):
+
+| Grid del lado | Inicio | Tecla | Resultado |
+| --- | --- | --- | --- |
+| Izquierda (560,660) | ↑ | se desliza a la **izquierda** (x → 529,7) |
+| Derecha (640,660) | ↑ | se desliza a la **derecha** (x → 670,3) |
+| Centro (600,660) | ↑ | empate → desempate **+X** (x → 673,7) |
+| Lado derecho, cerca del top (682,546) | ← | empate vertical: arriba 19 px vs abajo 69 px → **arriba** (y → 524,3) |
+| Lado derecho, cerca del bottom (682,594) | ← | arriba 101 px vs abajo 8 px → **abajo** (y → 615,7) |
+| Arriba derecha (640,470) | ↓ | **derecha** (x → 670,3) |
+| Arriba izquierda (560,470) | ↓ | **izquierda** (x → 529,7) |
+| Clic hacia arriba (600,650) | — | bloqueo → cancel (sin deslizamiento) |
+
+Cada caso: el lado elegido coincide con la distancia más corta al extremo libre, y el desplazamiento vertical de las diagonales de clic se mantiene intacto.
 
 ### Dev server
 

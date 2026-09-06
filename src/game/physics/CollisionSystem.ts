@@ -24,6 +24,20 @@ export class CollisionSystem {
 
   /** ¿El rectángulo centrado en (cx, cy) choca con algún obstáculo? */
   isBlocked(cx: number, cy: number, halfWidth: number, halfHeight: number): boolean {
+    return this.findBlockingObstacle(cx, cy, halfWidth, halfHeight) !== null;
+  }
+
+  /**
+   * Devuelve el primer obstáculo que solapa el rectángulo centrado en (cx, cy).
+   * Se usa para identificar el AABB concreto que bloquea una dirección y poder
+   * elegir localmente el lado por el que deslizarse.
+   */
+  private findBlockingObstacle(
+    cx: number,
+    cy: number,
+    halfWidth: number,
+    halfHeight: number,
+  ): Phaser.Geom.Rectangle | null {
     const left = cx - halfWidth;
     const right = cx + halfWidth;
     const top = cy - halfHeight;
@@ -31,10 +45,10 @@ export class CollisionSystem {
 
     for (const ob of this.obstacles) {
       if (left < ob.right && right > ob.left && top < ob.bottom && bottom > ob.top) {
-        return true;
+        return ob;
       }
     }
-    return false;
+    return null;
   }
 
   /**
@@ -47,9 +61,14 @@ export class CollisionSystem {
    * desliza por el borde (colisión parcial). Nada de esto busca rutas.
    *
    * Con `slideOnBlock` (movimiento por teclado), cuando la dirección principal
-   * queda bloqueada sin componente lateral, se intenta un desplazamiento
-   * lateral determinista por el borde: hacia +X si la primaria es vertical,
-   * hacia +Y si la primaria es horizontal. No hay búsqueda ni aleatoriedad.
+   * queda bloqueada sin componente lateral, se elige el lado por el que pasar:
+   * se identifica el obstáculo que bloquea y se compara la distancia vertical/horizontal
+   * desde la posición actual del collider hasta cada extremo lateral libre,
+   * teniendo en cuenta el tamaño del collider para quedar completamente fuera del AABB.
+   * Se desliza un paso hacia el extremo más cercano. En empate se conserva el
+   * desempate determinista previo (+X para primaria vertical, +Y para primaria
+   * horizontal). Si el lado preferido está ocupado, se intenta el contrario.
+   * La decisión es O(1) y local: solo se evalúan los dos extremos de un obstáculo.
    */
   resolveStep(
     x: number,
@@ -77,15 +96,46 @@ export class CollisionSystem {
 
     if (slideOnBlock) {
       const slideStep = Math.max(Math.abs(dx), Math.abs(dy));
+
       if (appliedX === 0 && dx !== 0 && dy === 0) {
-        if (!this.isBlocked(nx, ny + slideStep, halfWidth, halfHeight)) {
-          ny += slideStep;
-          appliedY = slideStep;
+        // Primaria horizontal bloqueada: deslizar en vertical (↑ o ↓).
+        const block = this.findBlockingObstacle(x + dx, ny, halfWidth, halfHeight);
+        if (block) {
+          // Posición del centro del collider para quedar por completo del
+          // obstáculo por arriba o por abajo (incluye la semialtura del collider).
+          const distTop = Math.abs(ny - (block.top - halfHeight));
+          const distBottom = Math.abs(ny - (block.bottom + halfHeight));
+
+          const preferred =
+            distTop < distBottom ? -slideStep : distBottom < distTop ? slideStep : slideStep;
+
+          if (!this.isBlocked(nx, ny + preferred, halfWidth, halfHeight)) {
+            ny += preferred;
+            appliedY = preferred;
+          } else if (!this.isBlocked(nx, ny - preferred, halfWidth, halfHeight)) {
+            ny -= preferred;
+            appliedY = -preferred;
+          }
         }
       } else if (appliedY === 0 && dy !== 0 && dx === 0) {
-        if (!this.isBlocked(nx + slideStep, ny, halfWidth, halfHeight)) {
-          nx += slideStep;
-          appliedX = slideStep;
+        // Primaria vertical bloqueada: deslizar en horizontal (← o →).
+        const block = this.findBlockingObstacle(nx, y + dy, halfWidth, halfHeight);
+        if (block) {
+          // Posición del centro del collider para quedar por completo fuera del
+          // obstáculo por la izquierda o la derecha (incluye la semianchura).
+          const distLeft = Math.abs(nx - (block.left - halfWidth));
+          const distRight = Math.abs(nx - (block.right + halfWidth));
+
+          const preferred =
+            distLeft < distRight ? -slideStep : distRight < distLeft ? slideStep : slideStep;
+
+          if (!this.isBlocked(nx + preferred, ny, halfWidth, halfHeight)) {
+            nx += preferred;
+            appliedX = preferred;
+          } else if (!this.isBlocked(nx - preferred, ny, halfWidth, halfHeight)) {
+            nx -= preferred;
+            appliedX = -preferred;
+          }
         }
       }
     }
