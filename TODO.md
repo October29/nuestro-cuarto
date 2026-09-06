@@ -15,10 +15,11 @@ Prototipo jugable
 - [ ] Elegir y preparar la estructura inicial del motor 2D.
 - [ ] Evaluar migración del prototipo actual a Phaser + TypeScript + Vite.
 - [ ] Crear una escena 2D real.
-- [ ] Crear el primer personaje.
-- [ ] Añadir movimiento del personaje.
-- [ ] Añadir cámara.
-- [ ] Crear límites y colisiones básicas.
+- [x] Crear el primer personaje.
+- [x] Añadir movimiento del personaje.
+- [x] Añadir cámara.
+- [x] Crear límites de la habitación.
+- [ ] Colisiones del escenario (zonas transitables y objetos).
 - [ ] Crear sistema básico de interacción.
 - [ ] Convertir algunos elementos de la habitación en objetos interactivos.
 
