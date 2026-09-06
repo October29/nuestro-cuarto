@@ -22,6 +22,8 @@ Prototipo jugable
 - [ ] Colisiones del escenario (zonas transitables y objetos).
 - [ ] Crear sistema básico de interacción.
 - [ ] Convertir algunos elementos de la habitación en objetos interactivos.
+- [ ] Movimiento por click a una posición del suelo.
+- [ ] Interacción por click sobre la indicación.
 
 ---
 
