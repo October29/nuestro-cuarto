@@ -21,6 +21,9 @@ export interface SessionHandlers {
   onPeerLeft(reason: string): void;
   /** Error básico del signaling o de la negociación P2P. */
   onError(error: Error): void;
+  /** El signaling confirmó la sala (created/joined): el código ya es válido
+   * y puede mostrarse, aunque el canal P2P todavía no esté abierto. */
+  onRoomCreated?(roomCode: string): void;
 }
 
 export interface NetworkSessionOptions {
@@ -86,6 +89,7 @@ export class NetworkSession {
       await this.signaling.connect();
       const code = await this.signaling.createRoom();
       this.code = code;
+      this.handlers.onRoomCreated?.(code);
       this.transport = this.makeTransport(this.signaling, this.transportHandlers(), 'host');
       await this.transport.connect();
       return code;
@@ -105,6 +109,7 @@ export class NetworkSession {
     try {
       await this.signaling.connect();
       await this.signaling.joinRoom(roomCode);
+      this.handlers.onRoomCreated?.(roomCode);
       this.transport = this.makeTransport(this.signaling, this.transportHandlers(), 'visitor');
       await this.transport.connect();
     } catch (error) {

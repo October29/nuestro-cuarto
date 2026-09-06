@@ -410,10 +410,10 @@ La propuesta se aprueba con estas elecciones cerradas:
 
 Propuesta aprobada con las tres correcciones (modelo host/visitor sin
 autoridad, validación en tres etapas M07-A/B/C, UI desacoplada del
-transporte). Pendiente: revisión del plan de implementación por etapas antes
-de comenzar a programar. Una vez aprobado, se implementará incrementalmente en
-`milestone-07` con commits pequeños, comprobando build + single-player +
-documentación en cada etapa. No se tocará `main` ni se iniciará M08.
+transporte). Implementación de Etapas 1–5 **completada** en `milestone-07`.
+Tres bugs de integración detectados en M07-A real y corregidos (ver §20).
+Quedan pendientes las validaciones M07-A/B/C en entorno real. No se tocará
+`main` ni se iniciará M08.
 
 ---
 
@@ -702,3 +702,91 @@ real, que son el criterio del milestone:
 
 Tras la Etapa 5 no se implementarán nuevas funcionalidades de M07 hasta
 completar y aprobar esas validaciones.
+
+---
+
+## 20. Corrección de integración M07-A (post-Etapa 5)
+
+Tras la implementación de la Etapa 5, la validación M07-A real (dos pestañas en la
+misma máquina) reveló tres bugs de integración que impedían la conexión P2P:
+
+### 20.1 Causa A — Oferta WebRTC perdida antes de que exista el peer
+
+**Síntoma:** El host creaba la sala, el servidor registraba "sala creada:
+MT266S", pero la UI nunca mostraba el código y la negociación terminaba en
+"negociación agotada (timeout)" a los 15 s.
+
+**Causa raíz:** `RtcPeerTransport.connect()` (rol host) creaba y enviaba el
+`offer` **inmediatamente** al crear la sala, pero en ese momento el visitor
+todavía no se había unido. El servidor de signaling solo retransmite señales si
+existe otro peer (`otherPeer`), así que el `offer` se descartaba silenciosamente.
+El host nunca re-enviaba el `offer` al llegar el visitor → el visitor nunca
+recibía offer → no respondía answer → canal nunca se abría → timeout.
+
+**Corrección en `src/network/RtcPeerTransport.ts`:**
+- El host ya **no** envía el `offer` dentro de `connect()`.
+- Se suscribe al evento `peer-joined` del signaling (que ya llega al
+  `SignalingClient`).
+- Solo al recibir `peer-joined` (y si `negotiationStarted === false`) llama a
+  `startHostNegotiation()`, que crea el `DataChannel`, genera el `offer` y
+  arranca el timeout de negociación.
+- El visitor arranca su timeout al recibir el `offer` (antes era al conectar).
+- Guarda contra `peer-joined` duplicados: `negotiationStarted` evita ofertas
+  repetidas.
+- El timeout de negociación (`NEGOTIATION_TIMEOUT_MS = 15000`) ahora arranca
+  **cuando empieza la negociación real**, no mientras el host espera a que alguien
+  se una.
+
+### 20.2 Causa B — Botón "Unirse" nunca se habilita al escribir
+
+**Síntoma:** En la segunda pestaña, al introducir el código manualmente, el botón
+"Unirse" permanecía deshabilitado.
+
+**Causa raíz:** No existía ningún listener sobre el input del código que
+recalculara `joinBtn.disabled`. Ese flag solo se recalculaba dentro de
+`setUIState()`, que solo se invocaba por cambios de sesión.
+
+**Corrección en `src/ui/connectMenu.ts`:**
+- Añadido listener `input` sobre `room-code-input` que llama a
+  `updateJoinButton()`.
+- Centralizada la regla en un método privado `updateJoinButton()`:
+  `joinBtn.disabled = !(state === 'idle' || state === 'disconnected') || value.trim().length < 6`.
+- `setUIState()` y `resetUI()` ahora delegan en ese método. No hay duplicación de
+  la lógica.
+
+### 20.3 Causa C — Código de sala no se muestra hasta que el canal se abre
+
+**Síntoma:** "Al pulsar 'Crear sala', el servidor registra correctamente 'sala
+creada: MT266S'. Sin embargo, la UI NO muestra el código de sala."
+
+**Causa raíz:** `ConnectMenu.handleCreate()` hacía `await
+this.session.createRoom()` y solo entonces pintaba el código. Pero
+`NetworkSession.createRoom()` no resuelve hasta que `transport.connect()` abre
+el canal de datos (o falla tras 15 s). La sala ya existía en el signaling, pero
+la UI esperaba a la negociación P2P completa.
+
+**Corrección en `src/network/NetworkSession.ts` + `src/ui/connectMenu.ts`:**
+- Nuevo handler opcional en `SessionHandlers`: `onRoomCreated?(roomCode)`.
+- `NetworkSession.createRoom()` y `joinRoom()` invocan
+  `handlers.onRoomCreated?.(code)` **inmediatamente después** de que el
+  signaling confirma `created`/`joined`, **antes** de `transport.connect()`.
+- `ConnectMenu.buildHandlers()` implementa `onRoomCreated`: pinta el código,
+  muestra `codeDisplay`, deshabilita `codeInput`.
+- La UI muestra el código **mientras la negociación WebRTC está en curso**;
+  `createRoom()` mantiene su semántica original (resuelve al abrir el canal).
+
+### Archivos modificados
+- `src/network/RtcPeerTransport.ts` — negociación diferida a `peer-joined`, timeout al iniciar negociación, guarda contra ofertas duplicadas.
+- `src/network/NetworkSession.ts` — handler `onRoomCreated` disparado tras `created`/`joined`.
+- `src/ui/connectMenu.ts` — listener `input` en código, `updateJoinButton()` centralizado, muestra código vía `onRoomCreated`.
+
+### Validación
+- `npm run build` (TypeScript strict + Vite): **OK**.
+- Comprobaciones estáticas: `src/game/` no importa WebRTC; `RemotePlayer`/`RoomScene` sin `RTCPeerConnection`/`RTCDataChannel`/`SignalingClient`/`RtcPeerTransport`.
+- Regresiones: single-player intacto (`Player.ts`, `CollisionSystem.ts`, `Sofa.ts` sin cambios); chat y `PlayerSync`/`RemotePlayer` sin tocar.
+- Harness de regresión (Node, WebRTC mock + servidor real): flujo host→visitor con offer tras `peer-joined`, `onRoomCreated` antes de canal, peer-joined duplicado no duplica oferta, host no timeout mientras espera peer — **todas las aserciones pasan**.
+- M07-A real (dos pestañas navegador): **no ejecutable en este entorno** (sin navegador). Pasos para validar manualmente: arrancar signaling (`ws://0.0.0.0:8787`), servir juego (`npm run dev`), pestaña A crea sala → código aparece antes de "conectado", pestaña B escribe código → botón "Unirse" se habilita al completar 6 chars → B se une → ambos conectados → movimiento bidireccional + sofá + chat → desconexión limpia.
+
+---
+
+## 21. Estado actual de M07

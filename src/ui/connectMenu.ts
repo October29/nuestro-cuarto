@@ -21,6 +21,7 @@ export class ConnectMenu {
   private onMessage: ((message: PeerMessage) => void) | null = null;
   private sessionListeners = new Set<(session: NetworkSession | null) => void>();
   private readonly createSession: (handlers: SessionHandlers) => NetworkSession;
+  private currentState: SessionState = 'idle';
 
   private readonly createBtn: HTMLButtonElement;
   private readonly codeDisplay: HTMLDivElement;
@@ -49,6 +50,7 @@ export class ConnectMenu {
     this.codeInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this.handleJoin();
     });
+    this.codeInput.addEventListener('input', () => this.updateJoinButton());
 
     this.resetUI();
   }
@@ -154,15 +156,21 @@ export class ConnectMenu {
         this.showError(error.message);
         if (this.session?.state === 'error') this.setUIState('idle');
       },
+      onRoomCreated: (code) => {
+        this.codeText.textContent = code;
+        this.codeDisplay.hidden = false;
+        this.codeInput.disabled = true;
+      },
     };
   }
 
   private setUIState(state: SessionState): void {
+    this.currentState = state;
     const connected = state === 'connected';
     const idle = state === 'idle' || state === 'disconnected';
 
     this.createBtn.disabled = !idle;
-    this.joinBtn.disabled = !idle || this.codeInput.value.trim().length < 6;
+    this.updateJoinButton();
     this.codeInput.disabled = !idle;
     this.disconnectBtn.hidden = !connected;
     this.statusDiv.textContent = STATUS_TEXT[state];
@@ -170,16 +178,23 @@ export class ConnectMenu {
   }
 
   private resetUI(): void {
+    this.currentState = 'idle';
     this.codeDisplay.hidden = true;
     this.disconnectBtn.hidden = true;
     this.codeInput.value = '';
     this.codeInput.disabled = false;
     this.createBtn.disabled = false;
-    this.joinBtn.disabled = true;
+    this.updateJoinButton();
     this.statusDiv.textContent = STATUS_TEXT.idle;
     this.statusDiv.className = 'status-idle';
     this.errorMsg.textContent = '';
     this.errorMsg.hidden = true;
+  }
+
+  /** Recalcula si el botón Unirse debe estar habilitado. */
+  private updateJoinButton(): void {
+    const sessionAllowsJoin = this.currentState === 'idle' || this.currentState === 'disconnected';
+    this.joinBtn.disabled = !sessionAllowsJoin || this.codeInput.value.trim().length < 6;
   }
 
   private showError(message: string): void {

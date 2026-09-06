@@ -34,6 +34,7 @@ export class RtcPeerTransport implements NetworkTransport {
   private openReject: ((error: Error) => void) | null = null;
   private status: TransportState = 'idle';
   private closeNotified = false;
+  private negotiationStarted = false;
 
   constructor(
     private readonly signaling: SignalingClient,
@@ -53,13 +54,19 @@ export class RtcPeerTransport implements NetworkTransport {
 
     this.status = 'connecting';
     this.unsubscribeSignaling = this.signaling.subscribe((message) => {
-      if (message.type === 'signal') this.handleIncomingSignal(message.data);
+      if (message.type === 'signal') {
+        this.handleIncomingSignal(message.data);
+      } else if (message.type === 'peer-joined' && this.role === 'host') {
+        // El host creó la sala y ahora el visitor está presente: solo entonces
+        // arranca la negociación (corrección M07-A). Si el visitor ya estuviera
+        // conectado antes, el offer nunca se perdería porque no se envía antes.
+        this.startHostNegotiation();
+      }
     });
 
     return new Promise<void>((resolve, reject) => {
       this.openResolve = resolve;
       this.openReject = reject;
-      this.timeoutTimer = setTimeout(() => this.fail('negociación agotada (timeout)'), NEGOTIATION_TIMEOUT_MS);
 
       this.connection = new RTCPeerConnection({ iceServers: this.iceServers });
       this.connection.onicecandidate = (event) => {
@@ -81,17 +88,39 @@ export class RtcPeerTransport implements NetworkTransport {
         }
       };
 
-      if (this.role === 'host') {
-        this.channel = this.connection.createDataChannel(CHANNEL_LABEL);
-        this.setupChannel(this.channel);
-        void this.makeOffer();
-      } else {
+      if (this.role === 'visitor') {
         this.connection.ondatachannel = (event) => {
           this.channel = event.channel;
           this.setupChannel(event.channel);
         };
       }
     });
+  }
+
+  /**
+   * Inicia la negociación desde el lado host al recibir `peer-joined`.
+   * Protegido contra `peer-joined` duplicados: solo se negocia una vez.
+   */
+  private startHostNegotiation(): void {
+    if (this.role !== 'host' || this.negotiationStarted || this.status !== 'connecting') return;
+    if (!this.connection) return;
+
+    this.negotiationStarted = true;
+    this.startNegotiationTimeout();
+
+    this.channel = this.connection.createDataChannel(CHANNEL_LABEL);
+    this.setupChannel(this.channel);
+    void this.makeOffer();
+  }
+
+  /**
+   * El timeout de negociación arranca cuando la negociación empieza de verdad
+   * (el host al recibir peer-joined; el visitor al recibir el offer), no
+   * mientras el host espera a que alguien se una a la sala.
+   */
+  private startNegotiationTimeout(): void {
+    if (this.timeoutTimer) return;
+    this.timeoutTimer = setTimeout(() => this.fail('negociación agotada (timeout)'), NEGOTIATION_TIMEOUT_MS);
   }
 
   send(message: PeerMessage): boolean {
@@ -133,6 +162,8 @@ export class RtcPeerTransport implements NetworkTransport {
       switch (data.kind) {
         case 'offer': {
           if (this.role !== 'visitor') break;
+          // La negociación empieza aquí para el visitor: arranca su timeout.
+          this.startNegotiationTimeout();
           await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
