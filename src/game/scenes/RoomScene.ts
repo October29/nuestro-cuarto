@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 
 import { ROOM_HEIGHT, ROOM_WIDTH } from '../config';
 import { Player, PlayerInput } from '../entities/Player';
+import { Sofa } from '../objects/Sofa';
+import { InteractionSystem } from '../systems/InteractionSystem';
 
 interface WasdKeys {
   W: Phaser.Input.Keyboard.Key;
@@ -14,6 +16,7 @@ export class RoomScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
   private player!: Player;
+  private interactionSystem!: InteractionSystem;
 
   constructor() {
     super('room');
@@ -40,12 +43,20 @@ export class RoomScene extends Phaser.Scene {
 
     this.player = new Player(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 110);
 
+    const sofa = new Sofa(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 230);
+
+    this.interactionSystem = new InteractionSystem(this, this.player);
+    this.interactionSystem.addInteractable(sofa);
+
     this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
   }
 
   update(_time: number, delta: number): void {
-    this.player.update(delta, this.getPlayerInput());
+    const input = this.getPlayerInput();
+
+    this.interactionSystem.update();
+    this.player.update(delta, input);
   }
 
   private getPlayerInput(): PlayerInput {
