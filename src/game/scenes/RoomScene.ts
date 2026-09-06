@@ -54,9 +54,8 @@ export class RoomScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     const input = this.getPlayerInput();
-    const isMoving = input.up || input.down || input.left || input.right;
 
-    this.interactionSystem.update(delta, isMoving);
+    this.interactionSystem.update();
     this.player.update(delta, input);
   }
 

@@ -20,6 +20,7 @@ La escena solo orquesta; cada responsabilidad vive en su propio módulo:
 src/game/
 ├── config.ts                  → constantes del mundo y del radio de interacción
 ├── entities/Player.ts         → jugador con estados standing/sitting (no conoce al sillón)
+├── objects/InteractionActor.ts → contrato de capacidades que un objeto necesita del actor
 ├── objects/Interactable.ts    → interfaz base general de objetos interactuables
 ├── objects/Sofa.ts            → primer objeto interactuable (implementa Interactable)
 ├── systems/InteractionSystem.ts → detección de proximidad, selección y tecla E
@@ -29,35 +30,73 @@ src/game/
 Relación conceptual:
 
 ```
-Interactable        (interfaz general, sin lógica de muebles)
-    ↑
-   Sofa              (define su propia acción y comportamiento)
+InteractionActor      (capacidad: setSitting)
+      ↑
+     Player
+
+Interactable          (contrato general de un objeto interactuable)
+      ↑
+     Sofa
 ```
 
 Reglas de acoplamiento cumplidas:
 
 - `Player` **no** conoce al `Sofa`.
-- `InteractionSystem` **no** contiene lógica del sillón: trabaja solo con la interfaz `Interactable`.
-- `RoomScene` **no** sabe cómo funciona internamente el sillón; solo lo registra en el sistema.
+- `Sofa` **no** conoce a `Player`: depende solo del contrato `InteractionActor`.
+- `InteractionSystem` **no** contiene lógica del sillón (trabaja con la interfaz `Interactable`) **ni** controla el estado interno del Player.
+- `RoomScene` **no** sabe cómo funciona internamente el sillón ni contiene lógica de `sitting`; solo crea las piezas, registra interactuables y conecta.
 - No hay condiciones del tipo `if (playerNearSofa) { ... }`. El sistema funciona con cero, uno o muchos objetos interactuables.
-- No se crearon `Furniture`, `Chair`, `Bed`, `Table`, etc. La interfaz `Interactable` es la única abstracción.
+- No se crearon `Furniture`, `Chair`, `Bed`, `Table`, etc. Las únicas abstracciones son `Interactable` e `InteractionActor`.
 
 ## 3. Archivos creados
 
-- `src/game/objects/Interactable.ts` — interfaz con `getGameObject()`, `getPosition()`, `getActionLabel()` y `onInteract(player)`.
-- `src/game/objects/Sofa.ts` — entidad que implementa `Interactable`. Dibuja un sillón con shapes de Phaser (respaldo, asiento y brazos) y define la acción "Sentarse". Al interactuar, pone al jugador en estado sentado mediante duck-typing (`setSitting`), sin depender de la clase `Player`.
+- `src/game/objects/InteractionActor.ts` — contrato mínimo de las capacidades que un objeto interactuable necesita del actor: `setSitting(sitting: boolean): void`.
+- `src/game/objects/Interactable.ts` — interfaz con `getGameObject()`, `getPosition()`, `getActionLabel()` y `onInteract(actor: InteractionActor)`.
+- `src/game/objects/Sofa.ts` — entidad que implementa `Interactable`. Dibuja un sillón con shapes de Phaser (respaldo, asiento y brazos) y define la acción "Sentarse". Al interactuar, solicita al actor que se siente mediante `actor.setSitting(true)`, sin depender de la clase `Player`.
 - `src/game/systems/InteractionSystem.ts` — sistema de interacción:
-  - registra objectos `Interactable` (`addInteractable`);
+  - registra objeto `Interactable` (`addInteractable`);
   - detecta el objetivo más cercano por proximidad;
   - escucha la tecla `E` (`Phaser.Input.Keyboard.KeyCodes.E`);
   - muestra/oculta la indicación `[E] <acción>`;
-  - al pulsar `E` invoca `onInteract` del objetivo.
+  - al pulsar `E` invoca `onInteract` del objetivo, pasándole al actor.
+  - **No** recibe información de movimiento ni cambia el estado sitting/standing del Player.
 
 ## 4. Archivos modificados
 
-- `src/game/entities/Player.ts` — nuevo estado interno `sitting`, métodos `setSitting()`, `isSitting()`, cuerpo sentado distinto (cabeza más baja y cuerpo más corto/compacto), y `clampInsideRoom()` ajustado según posición sentado/de pie.
+- `src/game/entities/Player.ts` — implementa `InteractionActor`; nuevo estado interno `sitting`; métodos `setSitting()` e `isSitting()`; cuerpo sentado distinto; y `clampInsideRoom()` ajustado según posición sentado/de pie. Es el responsable de levantarse al detectar movimiento estando sentado.
 - `src/game/config.ts` — se añadió `INTERACTION_RADIUS = 80` (radio de interacción configurable en un solo sitio).
-- `src/game/scenes/RoomScene.ts` — crea el `Sofa`, instancia el `InteractionSystem`, lo registra y aporta la señal `isMoving` al sistema cada frame.
+- `src/game/scenes/RoomScene.ts` — crea el `Sofa`, instancia el `InteractionSystem`, lo registra y conecta las piezas. Ya **no** calcula una señal `isMoving` para levantar al Player.
+
+## 4a. Corrección arquitectónica (revisión posterior)
+
+Tras una revisión arquitectónica de la primera versión de Milestone 04 se detectaron dos problemas y se corrigieron:
+
+**Problema 1 — contrato de `Interactable` incorrecto.** `Interactable.onInteract` recibía un `Phaser.GameObjects.Container` genérico, y `Sofa` lo convertía con `player as unknown as { setSitting(...) }` para ocultar el contrato. Esto hacía que el objeto interactuable dependiera de una suposición no declarada (`duck-typing` con un cast).
+
+*Solución:* se creó el contrato `InteractionActor` con `setSitting(sitting: boolean): void`. `Interactable.onInteract(actor: InteractionActor)` y `Sofa` ahora dependen únicamente de esa capacidad. El cast `as unknown as` se eliminó. `Player` implementa `InteractionActor`, de modo que `RoomScene`/`InteractionSystem` pueden pasarlo a `onInteract` sin casts ni dependencias de la clase concreta.
+
+- **Qué responsabilidad tiene `InteractionActor`:** declara las capacidades que un objeto interactuable necesita del actor, de forma mínima y explícita. Hoy solo expone `setSitting`, pero puede crecer (p. ej. `playAnimation`, `teleport`) sin que `Sofa` dependa de `Player`.
+- **Por qué `Sofa` ya no depende de `Player`:** cumple `Interactable` y solo invoca `actor.setSitting(true)`. No importa ni conoce la clase `Player`; depende únicamente del contrato `InteractionActor`.
+
+**Problema 2 — `InteractionSystem` controlaba el estado sitting/standing.** `InteractionSystem.update()` recibía una señal `isMoving` de `RoomScene` y, si el Player estaba sentado, llamaba a `setSitting(false)` para levantarlo. Eso violaba la responsabilidad del estado del Player.
+
+*Solución:* se eliminó esa responsabilidad. `InteractionSystem.update()` ya no recibe ni `delta` ni `isMoving` y no toca el estado del Player. El flujo ahora es:
+
+```
+input de movimiento
+        ↓
+Player
+        ↓
+si está sentado → se levanta (setSitting(false))
+        ↓
+movimiento normal
+```
+
+- **Por qué el estado sitting/standing pertenece a `Player`:** el Player es el dueño de su propio movimiento y su propio estado. En `Player.update()`, si está sentado y recibe entrada de movimiento, se levanta (`setSitting(false)`, que reconstruye el visual de pie) y el movimiento continúa en esa misma actualización; si está sentado y no hay movimiento, no se desplaza.
+- **Qué cambió en `InteractionSystem`:** eliminó el bloque de `sitting`, `isMoving`, `delta`, la lectura de estado del Player (`playerObj`) y el método `clearTarget()` (que solo se usaba desde ese bloque). Ahora solo hace detección por proximidad, actualiza el prompt y ejecuta la interacción con la tecla `E`.
+- **Qué cambió en `RoomScene`:** dejó de calcular `isMoving` y dejó de pasarlo a `InteractionSystem`; ahora llama a `interactionSystem.update()` y `player.update(delta, input)` por separado.
+
+Además, `Interactable.getGameObject()` pasó a devolver `Phaser.GameObjects.Container` (en lugar de `GameObject`), lo que permite leer `displayWidth`/`displayHeight` sin el cast intermedio `as unknown as { displayWidth: number }` en `detectNearest()`.
 
 ## 5. Cómo se detecta el objeto más cercano
 
@@ -76,16 +115,17 @@ El resultado es determinista: con varios objetos dentro del radio se elige siemp
 
 1. El jugador se mueve con WASD/flechas (sin cambios respecto al milestone anterior).
 2. Si hay un objetivo cercano, se muestra la indicación.
-3. Al pulsar `E`, `InteractionSystem` detecta `Phaser.Input.Keyboard.JustDown(interactKey)` y llama a `currentTarget.onInteract(player)`.
-4. En el sillón, `onInteract` llama a `player.setSitting(true)`.
-5. El jugador queda sentado: no puede moverse, la indicación desaparece y no se re-dispara la interacción mientras esté sentado.
-6. Cuando el jugador pulsa cualquier dirección (movimiento), el sistema detecta `isMoving`, llama a `player.setSitting(false)` y el jugador vuelve al estado de pie. El siguiente frame el movimiento normal ya se aplica.
+3. Al pulsar `E`, `InteractionSystem` detecta `Phaser.Input.Keyboard.JustDown(interactKey)` y llama a `currentTarget.onInteract(this.player)`.
+4. En el sillón, `onInteract(actor)` llama a `actor.setSitting(true)` (el `actor` es el `Player`, que implementa `InteractionActor`).
+5. El jugador queda sentado: no se desplaza mientras no haya movimiento.
+6. `InteractionSystem` no interviene en el estado: simplemente sigue mostrando la indicación mientras haya un objetivo dentro del radio (pulsar `E` estando ya sentado es un no-op porque `setSitting(true)` está protegido por `if (this.sitting === sitting) return`).
 
 ## 7. Cómo funciona el estado standing/sitting
 
-- `Player` mantiene un booleano privado `sitting` (sin un sistema enorme de estados).
+- `Player` mantiene un booleano privado `sitting` (sin un sistema enorme de estados) y es el único responsable de ese estado.
 - `standing`: el jugador se mueve, `update()` aplica velocidad + normalización diagonal + límites de habitación.
-- `sitting`: `update()` retorna de inmediato (no se puede mover mientras está sentado). El sistema de interacción se encarga de levantarlo en cuanto detecta movimiento.
+- `sitting` sin movimiento: `update()` retorna de inmediato (no se desplaza).
+- `sitting` con movimiento: `update()` detecta la entrada, llama a `setSitting(false)` (reconstruye el visual de pie) y continúa con el movimiento en esa misma actualización.
 - El `sittingHalfWidth`/`sittingHalfHeight` son ligeramente distintos para que el clamp de límites siga siendo correcto en ambos estados.
 
 ## 8. Cómo se representa visualmente el estado
@@ -100,13 +140,13 @@ El resultado es determinista: con varios objetos dentro del radio se elige siemp
 - `updatePrompt()` se ejecuta cada frame:
   - si hay objetivo → `setText('[E] ' + getActionLabel())` y `setVisible(true)`;
   - si no hay objetivo → `setVisible(false)`.
-- Mientras el jugador está sentado se oculta la indicación (`clearTarget()`), además de `updatePrompt()`.
-- El texto siempre está desactivado salvo cuando existe un objetivo válido; se actualiza automáticamente con la acción del objeto actual.
+- La indicación se actualiza automáticamente con la acción del objeto actual y desaparece en cuanto el jugador sale del radio, sin depender del estado sitting/standing del Player.
 
 ## 10. Qué pruebas se ejecutaron
 
 - `npm run build` completado: **TypeScript sin errores** (`tsc` estricto) y build de Vite correcto (11 módulos transformados). El warning de >500 kB por incluir Phaser es el habitual y no es nuevo.
-- `npm run dev` (puerto 5199): el servidor de desarrollo arranca y responde `HTTP 200` en `/`, en `src/game/objects/Sofa.ts` y en `src/game/systems/InteractionSystem.ts` (módulos transformados correctamente por Vite).
+- Revisión estática confirmando que no quedan casts `as unknown` relacionados con `Player`, `Sofa` o `Interactable`; que `InteractionSystem` ya no recibe `isMoving`; que `RoomScene` ya no calcula una señal de movimiento para levantar al Player; y que `Player` levanta por sí mismo al recibir movimiento estando sentado.
+- `npm run dev`: el servidor de desarrollo arranca correctamente (comprobado en la primera versión del Milestone 04).
 - Prueba de lógica de `detectNearest()` reimplementada y ejecutada en Node (2 objetos, radios y distancias reales):
   - en la posición de aparición del jugador no hay objetivo (distancia 95 px > radio 80);
   - acercándose por delante detecta el sillón correcto;
@@ -116,11 +156,12 @@ El resultado es determinista: con varios objetos dentro del radio se elige siemp
 
 ## 11. Qué quedó pendiente
 
-- Verificación visual en Android/escritorio (no se ha comprobado en navegador real desde CLI). Todo lo anterior es compilación + lógica; la experiencia visual (aparición de la indicación, sentarse y levantarse) debe confirmarse a mano.
+- Verificación visual en Android/escritorio (no se ha comprobado en navegador real desde CLI). Todo lo anterior es compilación + revisión de arquitectura; la experiencia visual (aparición de la indicación, sentarse y levantarse) debe confirmarse a mano.
 - No se marcan tareas de `TODO.md` como completadas ("Crear sistema básico de interacción", "Convertir algunos elementos de la habitación en objetos interactivos", "Interfaz de interacción", "Indicador de objeto interactivo") hasta la verificación visual.
 - El jugador se "sienta en su sitio actual" al pulsar `E`, no se ancla aún a la posición del sillón (snapping opcional futuro).
 - No se muestra resaltado del objeto objetivo (solo el texto `[E] Sentarse`); se puede añadir en una iteración posterior.
 - La indicación de interacción está fija en pantalla; en móvil habrá que reposicionarla (controles táctiles y UI quedan para más adelante).
+- Como efecto de la corrección, mientras el jugador está sentado junto al sillón la indicación `[E] Sentarse` sigue mostrándose (el sistema funciona por proximidad y no controla el estado del Player). Pulsar `E` en ese caso es un no-op. Validar en la revisión visual si este comportamiento es el deseado.
 
 ## 12. Cómo verificarlo visualmente en Android
 
@@ -131,6 +172,6 @@ El resultado es determinista: con varios objetos dentro del radio se elige siemp
    - Al aparecer, el jugador está lejos del sillón y **no** hay indicación.
    - Acércate caminando al sillón: cuando estés a menos de 80 px aparece el texto **`[E] Sentarse`**.
    - Aléjate: la indicación desaparece.
-   - Pulsa `E` cerca del sillón: el jugador cambia a la pose sentada (cabeza baja, cuerpo compacto) y la indicación se oculta.
-   - Pulsa cualquier dirección (WASD o flechas): el jugador vuelve a la pose de pie y se puede mover con normalidad.
+   - Pulsa `E` cerca del sillón: el jugador cambia a la pose sentada (cabeza baja, cuerpo compacto).
+   - Pulsa cualquier dirección (WASD o flechas): el jugador vuelve a la pose de pie y se mueve en esa dirección en el mismo instante.
    - El movimiento y los límites de la habitación siguen funcionando igual que en el milestone 03.

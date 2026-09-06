@@ -1,16 +1,17 @@
 import Phaser from 'phaser';
 
 import { INTERACTION_RADIUS } from '../config';
+import { Player } from '../entities/Player';
 import { Interactable } from '../objects/Interactable';
 
 export class InteractionSystem {
-  private player: Phaser.GameObjects.Container;
+  private player: Player;
   private interactables: Interactable[] = [];
   private currentTarget: Interactable | null = null;
   private interactKey: Phaser.Input.Keyboard.Key;
   private promptText: Phaser.GameObjects.Text;
 
-  constructor(scene: Phaser.Scene, player: Phaser.GameObjects.Container) {
+  constructor(scene: Phaser.Scene, player: Player) {
     this.player = player;
     this.interactKey = scene.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.promptText = scene.add.text(0, 0, '', {
@@ -29,16 +30,7 @@ export class InteractionSystem {
     this.interactables.push(interactable);
   }
 
-  update(_delta: number, isMoving: boolean): void {
-    const playerObj = this.player as unknown as { isSitting(): boolean; setSitting(s: boolean): void };
-    if (playerObj.isSitting()) {
-      if (isMoving) {
-        playerObj.setSitting(false);
-      }
-      this.clearTarget();
-      return;
-    }
-
+  update(): void {
     this.detectNearest();
     this.updatePrompt();
 
@@ -56,8 +48,8 @@ export class InteractionSystem {
     for (const obj of this.interactables) {
       const pos = obj.getPosition();
       const go = obj.getGameObject();
-      const w = (go as unknown as { displayWidth: number }).displayWidth / 2;
-      const h = (go as unknown as { displayHeight: number }).displayHeight / 2;
+      const w = go.displayWidth / 2;
+      const h = go.displayHeight / 2;
 
       const cx = Phaser.Math.Clamp(px, pos.x - w, pos.x + w);
       const cy = Phaser.Math.Clamp(py, pos.y - h, pos.y + h);
@@ -70,11 +62,6 @@ export class InteractionSystem {
     }
 
     this.currentTarget = closest;
-  }
-
-  private clearTarget(): void {
-    this.currentTarget = null;
-    this.promptText.setVisible(false);
   }
 
   private updatePrompt(): void {

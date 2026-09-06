@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
 
+import { InteractionActor } from './InteractionActor';
+
 export interface Interactable {
-  getGameObject(): Phaser.GameObjects.GameObject;
+  getGameObject(): Phaser.GameObjects.Container;
   getPosition(): { x: number; y: number };
   getActionLabel(): string;
-  onInteract(player: Phaser.GameObjects.Container): void;
+  onInteract(actor: InteractionActor): void;
 }

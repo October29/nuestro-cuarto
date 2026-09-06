@@ -14,6 +14,13 @@ Added
 - Documento "ARCHITECTURE.md" con la dirección técnica del proyecto.
 - Documento "TODO.md" con la planificación inicial.
 
+Changed
+
+- Milestone 04 (interacción): corrección arquitectónica de los contratos de interacción.
+  - Nuevo contrato `InteractionActor` (`setSitting`) que desacopla `Sofa` de `Player`.
+  - `Interactable.onInteract(actor)` ahora depende de `InteractionActor` (elimina el cast en `Sofa`).
+  - El estado sitting/standing pasa a ser responsabilidad exclusiva de `Player`; `InteractionSystem` ya no controla el levantamiento al detectar movimiento.
+
 Planned
 
 - Transformar el prototipo estático en una escena 2D interactiva.

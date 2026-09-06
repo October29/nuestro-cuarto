@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { PLAYER_SPEED, ROOM_HEIGHT, ROOM_WIDTH } from '../config';
+import { InteractionActor } from '../objects/InteractionActor';
 
 export interface PlayerInput {
   up: boolean;
@@ -9,7 +10,7 @@ export interface PlayerInput {
   right: boolean;
 }
 
-export class Player extends Phaser.GameObjects.Container {
+export class Player extends Phaser.GameObjects.Container implements InteractionActor {
   private readonly standingHalfWidth = 14;
   private readonly standingHalfHeight = 26;
   private readonly sittingHalfWidth = 18;
@@ -29,7 +30,15 @@ export class Player extends Phaser.GameObjects.Container {
   }
 
   update(delta: number, input: PlayerInput): void {
-    if (this.sitting) return;
+    const hasMovement = input.up || input.down || input.left || input.right;
+
+    if (this.sitting) {
+      if (hasMovement) {
+        this.setSitting(false);
+      } else {
+        return;
+      }
+    }
 
     let vx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     let vy = (input.down ? 1 : 0) - (input.up ? 1 : 0);

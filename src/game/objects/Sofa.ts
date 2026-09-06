@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 
+import { InteractionActor } from './InteractionActor';
 import { Interactable } from './Interactable';
 
 export class Sofa implements Interactable {
@@ -30,8 +31,7 @@ export class Sofa implements Interactable {
     return 'Sentarse';
   }
 
-  onInteract(player: Phaser.GameObjects.Container): void {
-    const playerObj = player as unknown as { setSitting(sitting: boolean): void };
-    playerObj.setSitting(true);
+  onInteract(actor: InteractionActor): void {
+    actor.setSitting(true);
   }
 }
