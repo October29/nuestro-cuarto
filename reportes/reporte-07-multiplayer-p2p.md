@@ -525,13 +525,70 @@ WebRTC/Phaser directamente. También `npm run build` (strict + Vite) sin errores
 El single-player sigue funcionando exactamente igual: `NetworkSession` todavía
 no se importa desde ninguna escena.
 
-### Etapa 4 y Etapa 5 — pendiente
+### Etapa 4 — UI de conexión + chat (terminada)
 
-Per corrección de alcance aprobada, la integración queda ordenada así:
+Nueva carpeta `src/ui/` con `connectMenu.ts` y `chatPanel.ts`, más los
+elementos DOM en `index.html` y estilos en `style.css`. La UI se inicializa
+desde `src/main.ts` (`ConnectMenu` + `ChatPanel`), sin afectar al arranque del
+juego.
 
-- **Etapa 4**: UI de conexión (menú crear/unirse con código) y, en su momento,
-  el chat; consumiendo únicamente `NetworkSession`.
-- **Etapa 5**: `RemotePlayer` y su integración en `RoomScene` (sincronización
-  visual de jugadores).
+Arquitectura respetada:
 
-Etapas 4 y 5 NO están completadas. Sin cambios en `main`.
+```
+UI (ConnectMenu + ChatPanel)
+    ↓
+NetworkSession
+    ↓
+NetworkTransport
+    ↓
+WebRTC (RtcPeerTransport)
+```
+
+**ConnectMenu** (botón "Crear sala", campo + botón "Unirse", indicador de
+estado, código de sala visible, botón "Salir de la sala" y zona de error):
+- `createRoom()` / `joinRoom(code)` delegan en `NetworkSession`.
+- El código de sala se muestra al crearla para poder compartirlo.
+- Estado visible: desconectado / conectando / conectado / desconectado / error.
+- Errores mostrados: servidor inaccesible, sala no encontrada/llena, peer
+  desconectado, fallo de negociación.
+- Cierra la sesión con "Salir de la sala" (sin reconexión automática).
+- Acepta un fabricador de sesiones inyectable (`createSession`) para pruebas;
+  por defecto crea `NetworkSession` real con la URL de signaling configurable.
+
+**ChatPanel** (lista de mensajes, campo de texto, botón Enviar):
+- Envía y recibe solo a través de `NetworkSession` y el tipo
+  `PeerMessage`/`chat` ya definido (no hay un segundo formato de mensaje).
+- Enter envía; Escape quita el foco del campo y devuelve el foco al juego.
+- Máximo 200 caracteres por mensaje (constante `MAX_CHAT_LENGTH` del
+  protocolo, aplicada vía `maxlength`).
+- Mensajes locales y remotos visualmente distintos por alineación y color
+  (clases `chat-msg-local` / `chat-msg-remote`).
+- Sin persistencia, sin cuentas, sin moderación, sin multimedia.
+
+**Restricciones cumplidas**: la UI no importa `SignalingClient`,
+`RtcPeerTransport`, ni las APIs WebRTC (comprobado estáticamente), y solo
+depende de `NetworkSession` + `protocol`. El single-player sigue igual: la red
+es opt-in (no se conecta nada al arrancar) y `RoomScene`/`Player` no han sido
+modificados.
+
+**Preparada para M07-A/B/C**: al arrancar el signaling (Etapa 1) y el juego, el
+mismo flujo (Crear sala en un dispositivo → código → el otro se une) vale para
+dos pestañas en la misma máquina, dos dispositivos en LAN o dos redes distintas
+(según disponibilidad de STUN/red). M07-C seguirá siendo el criterio de éxito.
+
+Validación en Node (harness temporal con DOM falso y sesión mock; ya
+eliminado). 27 comprobaciones PASS: la UI no crea sesión sin interacción
+(red opt-in); creación de sala desde la UI (código visible, estado conectado,
+chip deshabilitado, Salir visible, chat enlazado); unión desde la UI (estado
+conectado, código reflejado); chat bidireccional (host→visitor y
+visitor→host); distinción visual local/remoto; límite de 200 caracteres
+aplicado y funcional; Enter envía; Escape devuelve el foco al juego; salida del
+visitor detectada por el host (aviso y vuelta a desconectado); la UI no importa
+WebRTC directamente; y error de sala inexistente mostrado. También
+`npm run build` (strict + Vite) sin errores.
+
+### Etapa 5 — pendiente
+
+**`RemotePlayer` y su integración en `RoomScene`** (sincronización visual de
+jugadores) quedan reservados para la Etapa 5, según la corrección de alcance
+aprobada. Etapa 5 NO está completada. Sin cambios en `main`.

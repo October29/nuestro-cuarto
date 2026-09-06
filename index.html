@@ -22,6 +22,45 @@
   <body>
     <div id="game"></div>
 
+    <div id="ui-layer">
+      <div id="connect-panel">
+        <div class="connect-row">
+          <button id="create-room-btn" type="button">Crear sala</button>
+        </div>
+        <div class="connect-row">
+          <input
+            id="room-code-input"
+            type="text"
+            maxlength="6"
+            placeholder="Código de sala"
+            autocomplete="off"
+            autocapitalize="characters"
+          />
+          <button id="join-room-btn" type="button" disabled>Unirse</button>
+        </div>
+        <div id="room-code-display" hidden>
+          Sala: <span id="room-code-text"></span>
+        </div>
+        <div id="connection-status" class="status-idle">desconectado</div>
+        <div id="connection-error" hidden></div>
+        <button id="disconnect-btn" type="button" hidden>Salir de la sala</button>
+      </div>
+
+      <div id="chat-panel" hidden>
+        <div id="chat-messages"></div>
+        <div class="chat-row">
+          <input
+            id="chat-input"
+            type="text"
+            maxlength="200"
+            placeholder="Mensaje (Enter para enviar, Escape para volver al juego)"
+            autocomplete="off"
+          />
+          <button id="chat-send-btn" type="button">Enviar</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
