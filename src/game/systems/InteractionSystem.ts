@@ -33,19 +33,36 @@ export class InteractionSystem {
 
   update(): void {
     this.detectNearest();
+    this.updatePrompt();
 
+    if (Phaser.Input.Keyboard.JustDown(this.interactKey)) {
+      this.performInteract();
+    }
+  }
+
+  /** Returns true if the click landed on the (visible) prompt and the interaction was performed. */
+  tryInteractFromPointer(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.promptText.visible) return false;
+
+    const bounds = this.promptText.getBounds();
+    if (Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) {
+      this.performInteract();
+      return true;
+    }
+
+    return false;
+  }
+
+  private performInteract(): void {
     if (this.player.isSitting()) {
-      this.updatePrompt();
-      if (this.seatedInteractable && Phaser.Input.Keyboard.JustDown(this.interactKey)) {
+      if (this.seatedInteractable) {
         const exit = this.seatedInteractable.getExitPoint();
         this.player.standUpAt(exit.x, exit.y);
       }
       return;
     }
 
-    this.updatePrompt();
-
-    if (this.currentTarget && Phaser.Input.Keyboard.JustDown(this.interactKey)) {
+    if (this.currentTarget) {
       this.currentTarget.onInteract(this.player);
       if (this.player.isSitting()) {
         this.seatedInteractable = this.currentTarget;

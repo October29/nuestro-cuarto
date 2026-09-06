@@ -48,6 +48,13 @@ export class RoomScene extends Phaser.Scene {
     this.interactionSystem = new InteractionSystem(this, this.player);
     this.interactionSystem.addInteractable(sofa);
 
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.interactionSystem.tryInteractFromPointer(pointer)) return;
+
+      const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      this.player.moveToPoint(world.x, world.y);
+    });
+
     this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
   }

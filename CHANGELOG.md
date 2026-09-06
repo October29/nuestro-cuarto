@@ -16,6 +16,13 @@ Added
 
 Changed
 
+- Milestone 05 (movimiento e interacción por click): el jugador puede moverse hasta la posición del suelo que se toca con el ratón/pantalla, y la interacción también puede ejecutarse pulsando sobre la indicación que se muestra en pantalla.
+  - `Player.moveToPoint(x, y)`: nueva API del Player para fijar un destino de movimiento.
+  - En `Player.update()`, si hay entrada de teclado (WASD/flechas) se cancela el destino por click y manda el teclado; si no hay teclado y existe un destino, el Player camina hacia él con la misma `PLAYER_SPEED` y se detiene al llegar.
+  - `InteractionSystem.performInteract()`: la lógica de interacción se unifica en un único método, compartido por la tecla `E` y por el click sobre la indicación (se elimina la duplicación que había en el flujo de `E`).
+  - `InteractionSystem.tryInteractFromPointer(pointer)`: resuelve si el click cae dentro de la indicación visible y, en tal caso, ejecuta la interacción (mismo comportamiento que `E`).
+  - En `RoomScene`, el evento `pointerdown` se enruta: primero prueba la interacción por click sobre la indicación y, si no aplica, convierte las coordenadas de pantalla a mundo con `cameras.main.getWorldPoint()` y fija `player.moveToPoint()`.
+  - No se implementaron colisiones, pathfinding ni controles táctiles (quedan fuera del alcance del milestone).
 - Milestone 04 (interacción): corrección arquitectónica de los contratos de interacción.
   - Nuevo contrato `InteractionActor` (`setSitting`) que desacopla `Sofa` de `Player`.
   - `Interactable.onInteract(actor)` ahora depende de `InteractionActor` (elimina el cast en `Sofa`).

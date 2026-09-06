@@ -18,6 +18,7 @@ export class Player extends Phaser.GameObjects.Container implements InteractionA
 
   private speed: number;
   private sitting = false;
+  private moveToTarget: { x: number; y: number } | null = null;
 
   constructor(scene: Phaser.Scene, x: number, y: number, speed: number = PLAYER_SPEED) {
     super(scene, x, y);
@@ -40,6 +41,21 @@ export class Player extends Phaser.GameObjects.Container implements InteractionA
       }
     }
 
+    if (hasMovement) {
+      this.moveToTarget = null;
+      this.moveByKeyboard(delta, input);
+    } else if (this.moveToTarget) {
+      this.moveTowardTarget(delta);
+    }
+
+    this.clampInsideRoom();
+  }
+
+  moveToPoint(x: number, y: number): void {
+    this.moveToTarget = { x, y };
+  }
+
+  private moveByKeyboard(delta: number, input: PlayerInput): void {
     let vx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     let vy = (input.down ? 1 : 0) - (input.up ? 1 : 0);
 
@@ -52,8 +68,22 @@ export class Player extends Phaser.GameObjects.Container implements InteractionA
 
     this.x += vx * step;
     this.y += vy * step;
+  }
 
-    this.clampInsideRoom();
+  private moveTowardTarget(delta: number): void {
+    const dx = this.moveToTarget!.x - this.x;
+    const dy = this.moveToTarget!.y - this.y;
+    const dist = Math.hypot(dx, dy);
+    const step = (this.speed * delta) / 1000;
+
+    if (dist <= step) {
+      this.x = this.moveToTarget!.x;
+      this.y = this.moveToTarget!.y;
+      this.moveToTarget = null;
+    } else {
+      this.x += (dx / dist) * step;
+      this.y += (dy / dist) * step;
+    }
   }
 
   setSitting(sitting: boolean): void {
