@@ -3,6 +3,7 @@ import Phaser from 'phaser';
 import { ROOM_HEIGHT, ROOM_WIDTH } from '../config';
 import { Player, PlayerInput } from '../entities/Player';
 import { Sofa } from '../objects/Sofa';
+import { CollisionSystem } from '../physics/CollisionSystem';
 import { InteractionSystem } from '../systems/InteractionSystem';
 
 interface WasdKeys {
@@ -41,9 +42,13 @@ export class RoomScene extends Phaser.Scene {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as WasdKeys;
 
-    this.player = new Player(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 110);
+    const collisionSystem = new CollisionSystem();
+
+    this.player = new Player(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 110, collisionSystem);
+    this.player.setDepth(1);
 
     const sofa = new Sofa(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 230);
+    collisionSystem.addObstacle(sofa);
 
     this.interactionSystem = new InteractionSystem(this, this.player);
     this.interactionSystem.addInteractable(sofa);
@@ -63,7 +68,7 @@ export class RoomScene extends Phaser.Scene {
     const input = this.getPlayerInput();
 
     this.interactionSystem.update();
-    this.player.update(delta, input);
+    this.player.update(delta, input, this.interactionSystem.getSeatedExitPoint());
   }
 
   private getPlayerInput(): PlayerInput {

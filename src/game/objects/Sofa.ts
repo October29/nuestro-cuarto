@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
 
+import { SOFA_BLOCK_HALF_HEIGHT, SOFA_BLOCK_HALF_WIDTH, SOFA_EXIT_GAP } from '../config';
+import { Obstacle } from '../physics/Obstacle';
 import { InteractionActor } from './InteractionActor';
 import { Interactable } from './Interactable';
 
-export class Sofa implements Interactable {
+export class Sofa implements Interactable, Obstacle {
   private container: Phaser.GameObjects.Container;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
@@ -27,13 +29,24 @@ export class Sofa implements Interactable {
     return { x: this.container.x, y: this.container.y };
   }
 
+  getCollisionRect(): Phaser.Geom.Rectangle {
+    return new Phaser.Geom.Rectangle(
+      this.container.x - SOFA_BLOCK_HALF_WIDTH,
+      this.container.y - SOFA_BLOCK_HALF_HEIGHT,
+      SOFA_BLOCK_HALF_WIDTH * 2,
+      SOFA_BLOCK_HALF_HEIGHT * 2,
+    );
+  }
+
   getActionLabel(): string {
     return 'Sentarse';
   }
 
   getExitPoint(): { x: number; y: number } {
-    const gap = 30;
-    return { x: this.container.x, y: this.container.y + this.container.height / 2 + gap };
+    return {
+      x: this.container.x,
+      y: this.container.y + SOFA_BLOCK_HALF_HEIGHT + SOFA_EXIT_GAP,
+    };
   }
 
   onInteract(actor: InteractionActor): void {

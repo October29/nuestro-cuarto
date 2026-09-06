@@ -7,6 +7,18 @@ export const ROOM_HEIGHT = 800;
 export const PLAYER_SPEED = 260;
 export const INTERACTION_RADIUS = 80;
 
+// Collider del Player: espacio físico que ocupa en el suelo, más pequeño que
+// el dibujo visual para que la navegación se sienta natural. El centro del
+// collider coincide con la posición (x, y) del Player.
+export const PLAYER_COLLIDER_HALF_WIDTH = 10;
+export const PLAYER_COLLIDER_HALF_HEIGHT = 14;
+
+// Espacio físico (área bloqueante) del sofá, independiente de su dibujo.
+export const SOFA_BLOCK_HALF_WIDTH = 60;
+export const SOFA_BLOCK_HALF_HEIGHT = 30;
+// Hueco del punto de salida del sofá, medido desde el borde inferior del bloque.
+export const SOFA_EXIT_GAP = 40;
+
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',

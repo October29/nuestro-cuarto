@@ -1,6 +1,13 @@
 import Phaser from 'phaser';
 
-import { PLAYER_SPEED, ROOM_HEIGHT, ROOM_WIDTH } from '../config';
+import {
+  PLAYER_COLLIDER_HALF_HEIGHT,
+  PLAYER_COLLIDER_HALF_WIDTH,
+  PLAYER_SPEED,
+  ROOM_HEIGHT,
+  ROOM_WIDTH,
+} from '../config';
+import { CollisionSystem } from '../physics/CollisionSystem';
 import { InteractionActor } from '../objects/InteractionActor';
 
 export interface PlayerInput {
@@ -19,23 +26,29 @@ export class Player extends Phaser.GameObjects.Container implements InteractionA
   private speed: number;
   private sitting = false;
   private moveToTarget: { x: number; y: number } | null = null;
+  private collisionSystem: CollisionSystem;
 
-  constructor(scene: Phaser.Scene, x: number, y: number, speed: number = PLAYER_SPEED) {
+  constructor(scene: Phaser.Scene, x: number, y: number, collisionSystem: CollisionSystem, speed: number = PLAYER_SPEED) {
     super(scene, x, y);
 
     this.speed = speed;
+    this.collisionSystem = collisionSystem;
 
     this.buildStandingBody();
 
     scene.add.existing(this);
   }
 
-  update(delta: number, input: PlayerInput): void {
+  update(delta: number, input: PlayerInput, seatExitPoint: { x: number; y: number } | null = null): void {
     const hasMovement = input.up || input.down || input.left || input.right;
 
     if (this.sitting) {
       if (hasMovement) {
-        this.setSitting(false);
+        if (seatExitPoint) {
+          this.standUpAt(seatExitPoint.x, seatExitPoint.y);
+        } else {
+          this.setSitting(false);
+        }
       } else {
         return;
       }
@@ -65,24 +78,54 @@ export class Player extends Phaser.GameObjects.Container implements InteractionA
     }
 
     const step = (this.speed * delta) / 1000;
+    const dx = vx * step;
+    const dy = vy * step;
 
-    this.x += vx * step;
-    this.y += vy * step;
+    // Teclado: deslizamiento lateral habilitado. Si la dirección principal queda
+    // bloqueada sin componente lateral, se desliza por el borde (ver CollisionSystem).
+    const result = this.collisionSystem.resolveStep(
+      this.x,
+      this.y,
+      dx,
+      dy,
+      PLAYER_COLLIDER_HALF_WIDTH,
+      PLAYER_COLLIDER_HALF_HEIGHT,
+      true,
+    );
+    this.x = result.x;
+    this.y = result.y;
   }
 
   private moveTowardTarget(delta: number): void {
-    const dx = this.moveToTarget!.x - this.x;
-    const dy = this.moveToTarget!.y - this.y;
+    if (!this.moveToTarget) return;
+
+    const dx = this.moveToTarget.x - this.x;
+    const dy = this.moveToTarget.y - this.y;
     const dist = Math.hypot(dx, dy);
     const step = (this.speed * delta) / 1000;
 
+    // Click: se conserva la componente libre (deslizamiento por borde), pero sin
+    // el desplazamiento lateral por desempate del teclado. Si un paso queda
+    // completamente bloqueado, el destino se descarta: el Player se detiene en
+    // la geometría local (no hay pathfinding).
+    const hw = PLAYER_COLLIDER_HALF_WIDTH;
+    const hh = PLAYER_COLLIDER_HALF_HEIGHT;
+
     if (dist <= step) {
-      this.x = this.moveToTarget!.x;
-      this.y = this.moveToTarget!.y;
+      const result = this.collisionSystem.resolveStep(this.x, this.y, dx, dy, hw, hh, false);
+      this.x = result.x;
+      this.y = result.y;
       this.moveToTarget = null;
     } else {
-      this.x += (dx / dist) * step;
-      this.y += (dy / dist) * step;
+      const dirX = dx / dist;
+      const dirY = dy / dist;
+      const result = this.collisionSystem.resolveStep(this.x, this.y, dirX * step, dirY * step, hw, hh, false);
+      this.x = result.x;
+      this.y = result.y;
+
+      if (result.appliedX === 0 && result.appliedY === 0) {
+        this.moveToTarget = null;
+      }
     }
   }
 
@@ -102,9 +145,18 @@ export class Player extends Phaser.GameObjects.Container implements InteractionA
   }
 
   standUpAt(x: number, y: number): void {
-    this.x = x;
-    this.y = y;
+    const safe = this.collisionSystem.findSafePosition(
+      x,
+      y,
+      this.x,
+      this.y,
+      PLAYER_COLLIDER_HALF_WIDTH,
+      PLAYER_COLLIDER_HALF_HEIGHT,
+    );
+    this.x = safe.x;
+    this.y = safe.y;
     this.setSitting(false);
+    this.moveToTarget = null;
   }
 
   isSitting(): boolean {
