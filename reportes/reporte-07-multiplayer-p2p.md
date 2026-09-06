@@ -473,8 +473,65 @@ También comprobado: `npm run build` (TypeScript strict + Vite) sin errores. El
 single-player no depende de la red (`src/network/` no se importa desde ninguna
 escena todavía).
 
-### Etapa 3 en adelante — pendiente
+### Etapa 3 — NetworkSession (terminada)
 
-`NetworkSession` (orquestador que consume `NetworkTransport`), la
-`RemotePlayer` y su integración en `RoomScene`, y la UI (menú de conexión y
-chat) consumiendo únicamente `NetworkSession`. Sin cambios en `main`.
+Nuevo archivo `src/network/NetworkSession.ts`: capa de sesión que orquesta
+signaling + transporte y expone un punto único de entrada a la red.
+
+```
+Gameplay/UI
+    ↓
+NetworkSession
+    ↓
+NetworkTransport
+    ↓
+RtcPeerTransport / futuro transporte alternativo
+```
+
+- `createRoom(): Promise<string>` — ruta host: conecta el signaling (Etapa 1),
+  crea sala, construye el transporte y negocia el canal P2P. Devuelve el
+  código de sala.
+- `joinRoom(code): Promise<void>` — ruta visitor: conecta, se une y negocia.
+- `send(message: PeerMessage): boolean` — envío tipado; `false` si no hay
+  sesión activa.
+- `close(): void` — cierre local (no dispara `onPeerLeft`).
+- Estado expuesto: `state` (`idle | connecting | connected | disconnected |
+  error`), `roomCode`, `role` (`host | visitor`).
+- Eventos a la capa superior: `onOpen(roomCode)`, `onMessage(PeerMessage)`,
+  `onPeerLeft(reason)`, `onError(error)`. Errores básicos manejados: signaling
+  inaccesible, sala no encontrada/llena, negociación fallida (timeout en el
+  transporte). Tras un error se permite reintentar.
+- `makeTransport` inyectable (opciones del constructor): por defecto usa
+  `RtcPeerTransport`, y en pruebas se inyecta un transporte mock. Permite un
+  futuro transporte alternativo sin tocar la sesión.
+- Restricciones cumplidas: no conoce Phaser, no renderiza, no mueve jugadores,
+  no toca el DOM, no tiene lógica de chat/interpolación/posiciones y no accede
+  a `RTCPeerConnection` ni a `RTCDataChannel` (solo usa `NetworkTransport` y
+  `SignalingClient`). Reutiliza los tipos y la interfaz de la Etapa 2; no
+  duplica protocolo.
+- Modelo de dos peers intacto: el rol solo sirve para establecer la conexión
+  (el host crea oferta/canal; ninguno es autoridad global).
+
+Validación en Node (harness temporal con transporte mock sobre el servidor de
+signaling real; ya eliminado). 20 comprobaciones PASS: creación de sesión con
+sala real (código válido, `connected`, `onOpen`, `roomCode`, rol host);
+unión del visitor (`connected`, `onOpen`, rol visitor); envío y recepción
+tipados en ambos sentidos; `send` devuelve `false` sin conexión; cierre del
+visitor detectado por el host (`onPeerLeft`, ambos en `disconnected`);
+negociación fallida (rechazo, estado `error`, `onError`); reintento tras error
+funcional; comprobación estática de que `NetworkSession.ts` no usa APIs
+WebRTC/Phaser directamente. También `npm run build` (strict + Vite) sin errores.
+
+El single-player sigue funcionando exactamente igual: `NetworkSession` todavía
+no se importa desde ninguna escena.
+
+### Etapa 4 y Etapa 5 — pendiente
+
+Per corrección de alcance aprobada, la integración queda ordenada así:
+
+- **Etapa 4**: UI de conexión (menú crear/unirse con código) y, en su momento,
+  el chat; consumiendo únicamente `NetworkSession`.
+- **Etapa 5**: `RemotePlayer` y su integración en `RoomScene` (sincronización
+  visual de jugadores).
+
+Etapas 4 y 5 NO están completadas. Sin cambios en `main`.
