@@ -1,0 +1,256 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+
+  background: #111;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  font-family: sans-serif;
+}
+
+.room {
+  position: relative;
+
+  width: min(100vw, 1000px);
+  height: min(100vh, 700px);
+
+  overflow: hidden;
+
+  background: linear-gradient(
+    to bottom,
+    #182238 0%,
+    #29334d 58%,
+    #573f42 58%,
+    #3c292c 100%
+  );
+}
+
+/* VENTANA */
+
+.window {
+  position: absolute;
+
+  top: 50px;
+  left: 70px;
+
+  width: 220px;
+  height: 180px;
+
+  background: #10182d;
+
+  border: 12px solid #674d4d;
+
+  box-shadow: 0 10px 30px #080b14;
+}
+
+.moon {
+  text-align: center;
+
+  font-size: 55px;
+
+  margin-top: 25px;
+}
+
+.stars {
+  color: white;
+
+  text-align: center;
+
+  margin-top: 10px;
+}
+
+/* CUADRO */
+
+.picture {
+  position: absolute;
+
+  top: 60px;
+  right: 100px;
+
+  font-size: 70px;
+}
+
+/* ESTANTERÍA */
+
+.shelf {
+  position: absolute;
+
+  top: 190px;
+  right: 70px;
+
+  background: #68483b;
+
+  padding: 15px 25px;
+
+  border-radius: 5px;
+}
+
+/* TELEVISOR */
+
+.tv {
+  position: absolute;
+
+  left: 50%;
+  top: 100px;
+
+  transform: translateX(-50%);
+
+  width: 390px;
+  height: 250px;
+
+  padding: 18px;
+
+  background: #191919;
+
+  border-radius: 20px;
+
+  box-shadow: 0 15px 40px #080808;
+}
+
+.screen {
+  width: 100%;
+  height: 100%;
+
+  background: #111827;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  color: #b8c7ff;
+
+  font-size: 18px;
+
+  letter-spacing: 3px;
+}
+
+/* SOFÁ */
+
+.sofa {
+  position: absolute;
+
+  bottom: 120px;
+  left: 50%;
+
+  transform: translateX(-50%);
+
+  font-size: 180px;
+}
+
+/* PLANTA */
+
+.plant {
+  position: absolute;
+
+  bottom: 130px;
+  left: 80px;
+
+  font-size: 80px;
+}
+
+/* ALFOMBRA */
+
+.rug {
+  position: absolute;
+
+  bottom: 40px;
+  left: 50%;
+
+  transform: translateX(-50%);
+
+  width: 650px;
+  height: 180px;
+
+  background: #714c4c;
+
+  border-radius: 50%;
+}
+
+/* CONTROLES */
+
+.controls {
+  position: absolute;
+
+  bottom: 20px;
+  left: 50%;
+
+  transform: translateX(-50%);
+
+  display: flex;
+
+  gap: 12px;
+}
+
+.controls button {
+  width: 50px;
+  height: 50px;
+
+  border: none;
+
+  border-radius: 50%;
+
+  background: #222;
+  color: white;
+
+  font-size: 20px;
+
+  cursor: pointer;
+}
+
+/* OBJETOS INTERACTIVOS */
+
+.interactive {
+  cursor: pointer;
+
+  transition:
+    filter 0.2s ease,
+    transform 0.2s ease;
+}
+
+.interactive:hover {
+  filter: brightness(1.15);
+}
+
+/* MENSAJE */
+
+.interaction-message {
+  position: absolute;
+
+  left: 50%;
+  bottom: 85px;
+
+  transform: translateX(-50%) translateY(10px);
+
+  padding: 10px 16px;
+
+  background: rgba(10, 12, 20, 0.9);
+
+  color: #d8deff;
+
+  border: 1px solid rgba(184, 199, 255, 0.25);
+
+  border-radius: 8px;
+
+  font-size: 14px;
+
+  opacity: 0;
+
+  pointer-events: none;
+
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.interaction-message.visible {
+  opacity: 1;
+
+  transform: translateX(-50%) translateY(0);
+}
