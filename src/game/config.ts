@@ -19,6 +19,9 @@ export const SOFA_BLOCK_HALF_HEIGHT = 30;
 // Hueco del punto de salida del sofá, medido desde el borde inferior del bloque.
 export const SOFA_EXIT_GAP = 40;
 
+// Sincronización de estado del jugador: un envío cada ~100 ms (10 Hz).
+export const PLAYER_STATE_INTERVAL_MS = 100;
+
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',

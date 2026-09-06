@@ -5,6 +5,10 @@ import { Player, PlayerInput } from '../entities/Player';
 import { Sofa } from '../objects/Sofa';
 import { CollisionSystem } from '../physics/CollisionSystem';
 import { InteractionSystem } from '../systems/InteractionSystem';
+import { PlayerSync } from '../network/PlayerSync';
+
+import type { NetworkSession } from '../../network/NetworkSession';
+import type { PeerMessage } from '../../network/protocol';
 
 interface WasdKeys {
   W: Phaser.Input.Keyboard.Key;
@@ -18,6 +22,8 @@ export class RoomScene extends Phaser.Scene {
   private wasd!: WasdKeys;
   private player!: Player;
   private interactionSystem!: InteractionSystem;
+  private playerSync: PlayerSync | null = null;
+  private pendingSession: NetworkSession | null = null;
 
   constructor() {
     super('room');
@@ -62,6 +68,11 @@ export class RoomScene extends Phaser.Scene {
 
     this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+
+    if (this.pendingSession) {
+      this.startSync(this.pendingSession);
+      this.pendingSession = null;
+    }
   }
 
   update(_time: number, delta: number): void {
@@ -69,6 +80,30 @@ export class RoomScene extends Phaser.Scene {
 
     this.interactionSystem.update();
     this.player.update(delta, input, this.interactionSystem.getSeatedExitPoint());
+    this.playerSync?.update();
+  }
+
+  /** Vincula o desvincula la sesión activa de la red (null al salir/perderla). */
+  setNetworkSession(session: NetworkSession | null): void {
+    this.playerSync?.stop();
+    this.playerSync = null;
+
+    if (!session) return;
+    if (!this.player) {
+      this.pendingSession = session;
+      return;
+    }
+    this.startSync(session);
+  }
+
+  /** Reenvía los mensajes P2P de la sesión a la sincronización visual. */
+  handleNetworkMessage(message: PeerMessage): void {
+    this.playerSync?.onMessage(message);
+  }
+
+  private startSync(session: NetworkSession): void {
+    this.playerSync = new PlayerSync(this, session, this.player);
+    this.playerSync.start();
   }
 
   private getPlayerInput(): PlayerInput {

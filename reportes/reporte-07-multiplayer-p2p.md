@@ -587,8 +587,118 @@ visitor detectada por el host (aviso y vuelta a desconectado); la UI no importa
 WebRTC directamente; y error de sala inexistente mostrado. También
 `npm run build` (strict + Vite) sin errores.
 
-### Etapa 5 — pendiente
+### Etapa 5 — Integración de red con el juego + RemotePlayer (terminada)
 
-**`RemotePlayer` y su integración en `RoomScene`** (sincronización visual de
-jugadores) quedan reservados para la Etapa 5, según la corrección de alcance
-aprobada. Etapa 5 NO está completada. Sin cambios en `main`.
+Nuevos archivos `src/game/entities/RemotePlayer.ts` y `src/game/network/PlayerSync.ts`;
+`RoomScene` y `src/main.ts` integran la sesión. Esta es la última etapa de
+implementación de M07: a partir de aquí solo quedan las validaciones reales
+M07-A/B/C (ver al final de esta sección).
+
+Arquitectura de la integración:
+
+```
+RoomScene
+ ├── Player              ← jugador local (autoridad local, colisiones M06 intactas)
+ ├── RemotePlayer        ← reflejo visual del peer (sin input ni colisiones)
+ └── PlayerSync          ← orquesta la sincronización
+          ↓
+     NetworkSession      (solo consume mensajes tipados y estado)
+          ↓
+     NetworkTransport
+          ↓
+     RtcPeerTransport
+          ↓
+       WebRTC P2P
+```
+
+**RemotePlayer** (`src/game/entities/RemotePlayer.ts`):
+- Container mínimo con cuerpos sentado/de pie en una paleta azul suave,
+  distinta del jugador local. `updateState(x, y, sitting)` fija el destino y el
+  estado; `update()` aplica un lerp simple por fotograma
+  (`REMOTE_LERP_ALPHA = 0.25`, sin física, sin predicción, sin extrapolación).
+- Sin teclado, sin click, sin `CollisionSystem`, sin participación en la
+  resolución de movimiento ni en colisiones. No importa nada de la capa de red.
+- El `playerId` recibido se verifica en `PlayerSync`; coordenadas no finitas o
+  fuera de la habitación se ignoran/recortan al interior (clamp).
+
+**PlayerSync** (`src/game/network/PlayerSync.ts`):
+- Identidad: cada cliente genera un `playerId` local estable al iniciar la
+  sesión (`player-<aleatorio>`); sin cuentas ni autenticación.
+- Envío: a `PLAYER_STATE_INTERVAL_MS = 100` (10 Hz, constante en `config.ts`),
+  con un envío inmediato al arrancar. Solo con `session.state === 'connected'`.
+  El mensaje usa el `PlayerMessage`/`player_state` ya definido en el protocolo
+  (sin formato duplicado): `{ playerId, x, y, sitting }` tomado del Player local.
+- Recepción: los mensajes llegan ya tipados y validados por la capa de red; aquí
+  se filtra por tipo (solo `player_state`/`player_disconnected`), se ignoran los
+  inválidos y se descarta el propio id. El `RemotePlayer` se crea si no existe,
+  se actualiza si ya existe y se elimina con `player_disconnected` o al
+  detener la sincronización.
+- Desconexión/salida: `stop()` corta el envío y destruye todos los `RemotePlayer`
+  (el jugador local sigue funcionando igual).
+- No conoce WebRTC (solo consume `NetworkSession` + tipos del protocolo) y no
+  toca el `CollisionSystem` del jugador local.
+
+**Integración en `RoomScene` y `main.ts`:**
+- `RoomScene.setNetworkSession(session | null)`: vincula/desvincula la sesión;
+  al pasar `null` (Salir de la sala o perder la conexión) se detiene la
+  sincronización y se elimina el remoto. Soporta una sesión recibida antes de
+  que el `Player` exista (`pendingSession` aplicada en `create()`).
+- `RoomScene.handleNetworkMessage(message)`: reenvía los mensajes P2P a
+  `PlayerSync`. `update()` avanza el lerp del remoto.
+- `src/main.ts`: el evento de cambio de sesión de `ConnectMenu` enruta a la
+  escena (`setNetworkSession`) además del chat; el callback de mensajes invoca
+  `handleNetworkMessage` además de `ChatPanel`. El single-player sigue intacto:
+  sin sesión no se crea `PlayerSync`, no se envía nada y no hay `RemotePlayer`,
+  la red es opt-in.
+- La cámara sigue solo al Player local (sin cambios); profundidad mínima
+  existente: `RemotePlayer` usa `setDepth(1)` igual que el Player local.
+
+**Colisiones M06 intactas (confirmado):** `CollisionSystem`, `Obstacle`,
+`Player.ts` y `Sofa.ts` no se modificaron en esta etapa. El Player local sigue
+resolviendo su movimiento y colisiones exactamente igual; el `RemotePlayer` no
+participa en colisiones y no hay colisiones entre jugadores. Sin cambios en la
+mecánica del sofá M04/M06: `sitting` solo se replica remotamente cuando cambia.
+
+**Restricciones de autoridad cumplidas:** no hay autoridad global; cada cliente
+es autoridad de su propio Player, solo se replica el estado remoto, no se envían
+comandos de movimiento y ningún cliente corrige la posición del otro. No hay
+predicción, rollback, reconciliación ni snapshots.
+
+Validación en Node (harness temporal, ya eliminado). 29 comprobaciones PASS:
+dos clientes generan `playerId`s distintos; `start()` envía el estado inmediato
+y a 10 Hz; ambos reciben `player_state` y crean un `RemotePlayer` para el otro;
+mover el Player local cambia el estado enviado y el `RemotePlayer` del peer se
+acerca al destino por lerp; `sitting` se envía y el remoto cambia de cuerpo;
+mensajes no relacionados/malformados se ignoran (incluido el propio id);
+coordenadas fuera del mundo se recortan; `player_disconnected` elimina el
+remoto; `stop()` corta el envío y limpia; sin sesión conectada no se envía nada;
+comprobación estática de que `RemotePlayer` y `RoomScene` no mencionan
+`RTCPeerConnection`/`RTCDataChannel`/`SignalingClient`/`RtcPeerTransport`/
+`WebRTC`, que `RemotePlayer` no importa la capa de red ni input, que la UI sigue
+enrutando al chat y que el protocolo `player_state` se reutiliza. También
+`npm run build` (TypeScript strict + Vite) sin errores.
+
+**Limitaciones reales de esta etapa (documentadas):**
+- Suavizado por lerp de fotograma: suficiente para el PoC, no es interpolación
+  de red ni robusto ante latencia.
+- Un solo peer remoto máximo (el protocolo admite N peers, la UI empareja 2).
+- `player_disconnected` se procesa si llega, pero nadie lo envía hoy: la salida
+  se detecta por cierre del canal y la limpieza se hace vía `setNetworkSession`.
+- El chat etiqueta ambos extremos como `playerId 'local'` (comportamiento de
+  Etapa 4, sin cambios): la distinción visual no depende del id.
+- La validación de la negociación se hizo con mocks (sin navegador en el
+  entorno); el P2P real se comprueba en M07-A/B/C.
+
+**Pendiente real (M07 NO está aprobado):** quedan las validaciones en entorno
+real, que son el criterio del milestone:
+
+- **M07-A** — dos pestañas/navegadores en la misma máquina (localhost).
+- **M07-B** — dos dispositivos en la misma LAN (ICE host/mDNS real).
+- **M07-C** — dos dispositivos en redes distintas por Internet, con STUN
+  público. **Este es el criterio final del PoC.** Si por la red concreta no se
+  puede establecer P2P porque exigiría TURN (NAT simétrico, UDP bloqueado), se
+  documentará el fallo exacto y esa limitación; no se implementa TURN dentro de
+  M07.
+
+Tras la Etapa 5 no se implementarán nuevas funcionalidades de M07 hasta
+completar y aprobar esas validaciones.
