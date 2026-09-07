@@ -5,7 +5,6 @@ import { RoomScene } from './scenes/RoomScene';
 export const ROOM_WIDTH = 1200;
 export const ROOM_HEIGHT = 800;
 export const PLAYER_SPEED = 260;
-export const INTERACTION_RADIUS = 80;
 
 // Collider del Player: espacio físico que ocupa en el suelo, más pequeño que
 // el dibujo visual para que la navegación se sienta natural. El centro del

@@ -1115,4 +1115,99 @@ Tras el diagnóstico, esta sección se cierra con la causa confirmada y la instr
 
 ### 24.5 Estado del bug
 
-**En investigación.** Instrumentación temporal agregada y pendiente de la prueba manual del usuario. Sin cambios de comportamiento: `40c7905` (una sola notificación, una sola PlayerSync, create/join/chat/disconnect) se mantiene intacto y verificado por los 13 tests + build.
+**En investigación.** Instrumentación temporal agregada y pendiente de la prueba manual del usuario. Sin cambios de comportamiento: `40c7905` (una sola notificación, una sola PlayerSync, create/join/chat/disconnect) se mantiene intacto.
+
+---
+
+## 25. Incidencia: la tecla E no escribe en el chat + comportamiento definitivo de Enter
+
+### 25.1 Observación del usuario
+
+La tecla **E** sigue comportándose mal cuando el chat está enfocado: a veces **no aparece visualmente en el input**, aunque puede terminar entrando en el mensaje enviado. Además se especificó el comportamiento definitivo de **Enter** (enfoque/send/blur/no-robo entre campos) y la regla arquitectónica de que el teclado de gameplay queda inactivo mientras un campo editable tiene el foco.
+
+### 25.2 Causa del bug E
+
+`InteractionSystem` registraba E mediante:
+
+```typescript
+this.interactKey = scene.input.keyboard!.addKey(
+  Phaser.Input.Keyboard.KeyCodes.E,
+);
+```
+
+`addKey` tiene por defecto `enableCapture = true`, igual que `addKeys`/`createCursorKeys` del bug WASD (ver §23): Phaser captura E a nivel de `window` y llama `event.preventDefault()` sobre el keydown, lo que puede impedir que el navegador inserte la letra en `#chat-input`. Dependiendo del momento/timing de los listeners, la letra se perdía a veces de la vista, pero podía acabar en el mensaje enviado.
+
+### 25.3 Corrección de captura de Phaser
+
+Registro de E **sin captura del navegador** (segundo argumento `false`):
+
+```typescript
+this.interactKey = scene.input.keyboard!.addKey(
+  this.phaser.Input.Keyboard.KeyCodes.E,
+  false,
+);
+```
+
+Phaser ya no hace `preventDefault` sobre E; `Key.isDown`/`JustDown` siguen funcionando igual.
+
+### 25.4 Bloqueo de interacción mientras hay foco DOM
+
+`InteractionSystem.update()` solo ejecuta la interacción si **ningún campo editable tiene el foco**:
+
+```typescript
+if (
+  !isEditableFocused() &&
+  this.phaser.Input.Keyboard.JustDown(this.interactKey)
+) {
+  this.performInteract();
+}
+```
+
+`isEditableFocused()` es la misma utilidad del fix WASD (`src/ui/domFocus.ts`, §23) → la regla arquitectónica es única y centralizada.
+
+**Nota de estructura (para poder testear E en Node):** `phaser` no se puede importar en Node (`window is not defined` al evaluarse), y `InteractionSystem` también arrastraba `config.ts`, que construye `gameConfig` con valor Phaser. Para que los tests de E fueran reales se hizo **inyección de dependencias mínima**:
+
+- `InteractionSystem` ya no importa el namespace Phaser como valor (solo `import type`); recibe una API mínima tipada (`InteractionPhaserApi`) por constructor. `RoomScene` la satisface pasando `Phaser`.
+- `INTERACTION_RADIUS` se movió de `src/game/config.ts` a `InteractionSystem.ts` (único consumidor) para que el módulo no dependa de `config.ts`. Sin cambios de comportamiento.
+
+### 25.5 Comportamiento definitivo de Enter
+
+En `ChatPanel`:
+
+1. **Enter sin foco editable** → un **único** listener global en `document` enfoca el input del chat (solo si hay sesión activa; no interfiere con botones/enlaces).
+2. **Enter con el chat enfocado y texto no vacío (tras `trim()`)** → envía el mensaje, limpia el input y **conserva el foco**.
+3. **Enter con el chat enfocado y solo whitespace o vacío** → **NO envía** y hace `blur()`.
+4. **Nunca** se envía un mensaje cuyo contenido sea solo whitespace (doblemente protegido en `handleSend`).
+5. **Enter en otro campo editable (p. ej. `room-code-input`)** → no se roba: el listener global devuelve antes cuando `isEditableElement(activeElement)` y deja el comportamiento del campo intacto.
+6. Regla arquitectónica preservada: con foco editable, el teclado de gameplay está inactivo (WASD no mueve, E no interactúa; §23 + §25.4).
+
+Seguridad del listener global: si `ChatPanel` se construye más de una vez, se hace `removeEventListener` del listener anterior antes de registrar el nuevo (**nunca se acumulan listeners**); el listener siempre apunta a la instancia más reciente (`activeChat`). Se añadió `ChatPanel.destroy()` para liberar la referencia al liberar el panel.
+
+Los fixes de WASD del §23 (domFocus, `clearCaptures`, guardia de `getPlayerInput`) **no se han tocado**.
+
+### 25.6 Tests
+
+Nuevos/actualizados para cubrir lo pedido:
+
+- `tests/interactionSystem.test.ts` (4):
+  - E **NO** dispara interacción cuando `isEditableFocused()` es true.
+  - E **SÍ** dispara interacción cuando ningún editable tiene el foco.
+  - E no dispara si `JustDown` es false.
+  - E se registra **sin captura** (`addKey(key, false)`).
+- `tests/chatPanel.test.ts` (9):
+  - Un solo listener global de Enter aunque `ChatPanel` se cree varias veces.
+  - Enter sin foco editable enfoca el chat.
+  - Enter sin sesión no enfoca (chat oculto).
+  - Enter con texto envía, limpia y mantiene el foco.
+  - Enter envía solo el texto sin whitespace.
+  - Enter con whitespace NO envía y hace `blur`.
+  - Enter vacío NO envía y hace `blur`.
+  - El botón Enviar nunca manda whitespace.
+  - Enter en otro input editable no roba el foco ni fuerza el chat.
+- `tests/helpers/dom.ts`: se extendió con ids del chat, `createElement`, `addEventListener`/`removeEventListener` en `document`, `activeElement`, contadores de `focus`/`blur` y `tagName`.
+
+**Resultado: `npm test` → 26/26 PASS.** `npm run build` (TypeScript strict + Vite) → **OK**.
+
+### 25.7 Estado del bug
+
+**Corregido** (E capturada → sin captura + guardia de foco; Enter reglado explícitamente). El comportamiento de E se testea en Node con inyección de la API Phaser; la parte visual (letra E visible en el chat, interacción normal al jugar) queda pendiente de la confirmación manual del usuario.

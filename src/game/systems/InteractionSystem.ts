@@ -1,8 +1,36 @@
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
 
-import { INTERACTION_RADIUS } from '../config';
-import { Player } from '../entities/Player';
-import { Interactable } from '../objects/Interactable';
+import { isEditableFocused } from '../../ui/domFocus';
+
+import type { Player } from '../entities/Player';
+import type { Interactable } from '../objects/Interactable';
+
+// Radio de interacción. Vive aquí (y no en game/config.ts, que importa Phaser)
+// para que este módulo siga siendo importable en los tests de Node.
+const INTERACTION_RADIUS = 80;
+
+/**
+ * API mínima de Phaser que InteractionSystem necesita. RoomScene la satisface
+ * pasando el namespace `Phaser`; en los tests de Node se inyecta un sustituto
+ * (phaser no se puede importar en Node: accede a `window` al evaluarse).
+ */
+export interface InteractionPhaserApi {
+  Input: {
+    Keyboard: {
+      KeyCodes: { E: number };
+      JustDown(key: Phaser.Input.Keyboard.Key): boolean;
+    };
+  };
+  Geom: {
+    Rectangle: {
+      Contains(rect: Phaser.Geom.Rectangle, x: number, y: number): boolean;
+    };
+  };
+  Math: {
+    Clamp(value: number, min: number, max: number): number;
+    Distance: { Between(x1: number, y1: number, x2: number, y2: number): number };
+  };
+}
 
 export class InteractionSystem {
   private player: Player;
@@ -11,10 +39,19 @@ export class InteractionSystem {
   private seatedInteractable: Interactable | null = null;
   private interactKey: Phaser.Input.Keyboard.Key;
   private promptText: Phaser.GameObjects.Text;
+  private readonly phaser: InteractionPhaserApi;
 
-  constructor(scene: Phaser.Scene, player: Player) {
+  constructor(scene: Phaser.Scene, player: Player, phaser: InteractionPhaserApi) {
+    this.phaser = phaser;
     this.player = player;
-    this.interactKey = scene.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+
+    // Se registra E sin captura del navegador (false): Phaser no debe llamar
+    // preventDefault sobre E y bloquear la escritura en inputs del DOM.
+    this.interactKey = scene.input.keyboard!.addKey(
+      this.phaser.Input.Keyboard.KeyCodes.E,
+      false,
+    );
+
     this.promptText = scene.add.text(0, 0, '', {
       fontSize: '16px',
       color: '#ffffff',
@@ -41,7 +78,12 @@ export class InteractionSystem {
     this.detectNearest();
     this.updatePrompt();
 
-    if (Phaser.Input.Keyboard.JustDown(this.interactKey)) {
+    // Mientras un campo editable tiene el foco, el teclado del gameplay está
+    // inactivo: E no debe ejecutar interacciones.
+    if (
+      !isEditableFocused() &&
+      this.phaser.Input.Keyboard.JustDown(this.interactKey)
+    ) {
       this.performInteract();
     }
   }
@@ -51,7 +93,7 @@ export class InteractionSystem {
     if (!this.promptText.visible) return false;
 
     const bounds = this.promptText.getBounds();
-    if (Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) {
+    if (this.phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) {
       this.performInteract();
       return true;
     }
@@ -88,9 +130,9 @@ export class InteractionSystem {
       const w = go.displayWidth / 2;
       const h = go.displayHeight / 2;
 
-      const cx = Phaser.Math.Clamp(px, pos.x - w, pos.x + w);
-      const cy = Phaser.Math.Clamp(py, pos.y - h, pos.y + h);
-      const dist = Phaser.Math.Distance.Between(px, py, cx, cy);
+      const cx = this.phaser.Math.Clamp(px, pos.x - w, pos.x + w);
+      const cy = this.phaser.Math.Clamp(py, pos.y - h, pos.y + h);
+      const dist = this.phaser.Math.Distance.Between(px, py, cx, cy);
 
       if (dist < INTERACTION_RADIUS && dist < minDist) {
         minDist = dist;

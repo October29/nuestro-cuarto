@@ -64,7 +64,7 @@ export class RoomScene extends Phaser.Scene {
     const sofa = new Sofa(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 230);
     collisionSystem.addObstacle(sofa);
 
-    this.interactionSystem = new InteractionSystem(this, this.player);
+    this.interactionSystem = new InteractionSystem(this, this.player, Phaser);
     this.interactionSystem.addInteractable(sofa);
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {

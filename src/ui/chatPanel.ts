@@ -1,6 +1,37 @@
+import { isEditableElement } from './domFocus';
 import { MAX_CHAT_LENGTH } from '../network/protocol';
 import type { PeerMessage } from '../network/protocol';
 import type { NetworkSession } from '../network/NetworkSession';
+
+// Listener global único de Enter para enfocar el chat. Si ChatPanel se
+// construye más de una vez, se retira el listener anterior antes de registrar
+// el nuevo (nunca se acumulan) y este siempre actúa sobre la instancia más
+// reciente (`activeChat`).
+let activeChat: ChatPanel | null = null;
+let boundEnterListener: ((event: KeyboardEvent) => void) | null = null;
+
+function handleDocumentEnter(event: KeyboardEvent): void {
+  if (event.key !== 'Enter') return;
+
+  // Si hay foco en un campo editable, ese campo es el dueño de Enter: el chat
+  // no debe robarlo (ej. room-code-input).
+  const active = document.activeElement;
+  if (isEditableElement(active)) return;
+
+  // Los controles con Enter propio tampoco deben ser interferidos.
+  const tag = typeof active?.tagName === 'string' ? active.tagName.toUpperCase() : '';
+  if (tag === 'BUTTON' || tag === 'A') return;
+
+  activeChat?.focusChatInput();
+}
+
+function ensureGlobalEnterListener(): void {
+  if (boundEnterListener) {
+    document.removeEventListener('keydown', boundEnterListener);
+  }
+  boundEnterListener = handleDocumentEnter;
+  document.addEventListener('keydown', boundEnterListener);
+}
 
 export class ChatPanel {
   private readonly container: HTMLDivElement;
@@ -21,18 +52,25 @@ export class ChatPanel {
     this.input.maxLength = MAX_CHAT_LENGTH;
 
     this.sendBtn.addEventListener('click', () => this.handleSend());
-    this.input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        this.handleSend();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        this.input.blur();
-        document.getElementById('game')?.focus();
-      }
-    });
+    this.input.addEventListener('keydown', (e) => this.handleInputKeydown(e));
 
     this.hide();
+
+    activeChat = this;
+    ensureGlobalEnterListener();
+  }
+
+  /** Enfoca el input del chat. Solo actúa con una sesión activa (chat visible). */
+  focusChatInput(): void {
+    if (!this.session) return;
+    this.input.focus();
+  }
+
+  /** Libera la referencia del listener global (ciclo de vida seguro). */
+  destroy(): void {
+    if (activeChat === this) {
+      activeChat = null;
+    }
   }
 
   /** Vincula el chat a una sesión activa. */
@@ -53,6 +91,22 @@ export class ChatPanel {
   onRemoteMessage(message: PeerMessage): void {
     if (message.type !== 'chat') return;
     this.appendMessage(message.text, 'remote');
+  }
+
+  private handleInputKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      // Con texto → enviar y conservar el foco. Sin texto útil → blur.
+      if (this.input.value.trim().length > 0) {
+        this.handleSend();
+      } else {
+        this.input.blur();
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.input.blur();
+      document.getElementById('game')?.focus();
+    }
   }
 
   private handleSend(): void {
