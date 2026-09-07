@@ -24,6 +24,7 @@ export class RoomScene extends Phaser.Scene {
   private interactionSystem!: InteractionSystem;
   private playerSync: PlayerSync | null = null;
   private pendingSession: NetworkSession | null = null;
+  private activeSession: NetworkSession | null = null;
 
   constructor() {
     super('room');
@@ -85,7 +86,13 @@ export class RoomScene extends Phaser.Scene {
 
   /** Vincula o desvincula la sesión activa de la red (null al salir/perderla). */
   setNetworkSession(session: NetworkSession | null): void {
-    console.log('[setNetworkSession] session:', session ? 'provided' : 'null', 'playerSync exists:', !!this.playerSync);
+    if (session) {
+      if (session === this.activeSession) return;
+      this.activeSession = session;
+    } else {
+      this.activeSession = null;
+    }
+
     this.playerSync?.stop();
     this.playerSync = null;
 
@@ -103,7 +110,6 @@ export class RoomScene extends Phaser.Scene {
   }
 
   private startSync(session: NetworkSession): void {
-    console.log('[startSync] session.state:', session.state);
     this.playerSync = new PlayerSync(this, session, this.player);
     this.playerSync.start();
   }

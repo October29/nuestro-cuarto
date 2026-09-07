@@ -140,7 +140,8 @@ export class ConnectMenu {
     return {
       onOpen: () => {
         this.setUIState('connected');
-        this.notifySessionChanged();
+        // Notificación de sesión la da handleCreate/handleJoin tras la resolución
+        // de createRoom/joinRoom. Aquí solo actualizamos el estado visual de la UI.
       },
       onMessage: (message) => this.onMessage?.(message),
       onPeerLeft: (reason) => {

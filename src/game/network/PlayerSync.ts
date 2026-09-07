@@ -38,7 +38,6 @@ export class PlayerSync {
     private readonly localPlayer: Player,
   ) {
     this.localPlayerId = generatePlayerId();
-    console.log('[PlayerSync CREATED] localPlayerId:', this.localPlayerId);
   }
 
   /** Identidad local estable generada para esta sesión. */
@@ -48,14 +47,12 @@ export class PlayerSync {
 
   /** Comienza el envío periódico del estado local. */
   start(): void {
-    console.log('[PlayerSync START] localPlayerId:', this.localPlayerId);
     this.sendOwnState();
     this.timer = setInterval(() => this.sendOwnState(), PLAYER_STATE_INTERVAL_MS);
   }
 
   /** Detiene el envío y elimina las representaciones remotas. */
   stop(): void {
-    console.log('[PlayerSync STOP] localPlayerId:', this.localPlayerId, 'remoteCount:', this.remotePlayers.size);
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -72,7 +69,6 @@ export class PlayerSync {
 
   /** Maneja un mensaje P2P recibido (ya tipado y validado por la sesión). */
   onMessage(message: PeerMessage): void {
-    console.log('[onMessage] localPlayerId:', this.localPlayerId, 'type:', message.type, 'playerId:' , message.type === 'player_state' || message.type === 'player_disconnected' ? message.playerId : 'N/A');
     if (message.type === 'player_state') {
       this.applyRemoteState(message.playerId, message.x, message.y, message.sitting);
     } else if (message.type === 'player_disconnected') {
@@ -108,7 +104,6 @@ export class PlayerSync {
   }
 
   private applyRemoteState(playerId: string, x: number, y: number, sitting: boolean): void {
-    console.log('[applyRemoteState] localPlayerId:', this.localPlayerId, 'received playerId:', playerId, 'x:', x, 'y:', y, 'remotePlayers.size:', this.remotePlayers.size);
     if (!playerId || playerId === this.localPlayerId) return;
     if (!Number.isFinite(x) || !Number.isFinite(y) || typeof sitting !== 'boolean') return;
 
@@ -117,7 +112,6 @@ export class PlayerSync {
       remote = new RemotePlayer(this.scene, playerId, x, y);
       remote.setDepth(1);
       this.remotePlayers.set(playerId, remote);
-      console.log('[applyRemoteState] CREATED RemotePlayer playerId:', playerId, 'total remotes:', this.remotePlayers.size);
     }
     remote.updateState(x, y, sitting);
   }

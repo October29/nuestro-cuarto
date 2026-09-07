@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node node_modules/vite/bin/vite.js",
     "build": "node node_modules/typescript/bin/tsc && node node_modules/vite/bin/vite.js build",
+    "test": "node --test --import tsx \"tests/**/*.test.ts\"",
     "preview": "node node_modules/vite/bin/vite.js preview"
   },
   "license": "ISC",
@@ -13,6 +14,7 @@
     "phaser": "^4.2.1"
   },
   "devDependencies": {
+    "tsx": "^4.23.13",
     "typescript": "^5.9.2",
     "vite": "^8.2.2"
   }

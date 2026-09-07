@@ -793,29 +793,25 @@ la UI esperaba a la negociación P2P completa.
 
 ---
 
-## 22. Investigación bug M07-A: segundo RemotePlayer quieto
+## 22. Bug M07-A resuelto: segundo RemotePlayer quieto por doble ciclo de PlayerSync
 
 ### 22.1 Síntoma reportado
 
-El usuario confirma visualmente en dos pestañas (pestaña A y pestaña B):
+El usuario confirmó visualmente en dos pestañas (pestaña A y pestaña B):
 - Cada pestaña muestra **1 Player local** (nácar) y **2 RemotePlayer azules**
 - **Solamente uno** de los dos RemotePlayer azules se mueve siguiendo al jugador de la otra pestaña
 - El segundo RemotePlayer permanece **quieto** en su posición inicial
 
-En una conexión P2P 1:1 entre dos peers, cada pestaña debería mostrar:
-- 1 Player local (nácar)
-- 1 RemotePlayer (azul) — la representación del peer remoto
-
-La existencia de 2 RemotePlayer azules en cada pestaña es **anómala**.
+En una conexión P2P 1:1 entre dos peers, cada pestaña debería mostrar 1 Player local y 1 RemotePlayer.
 
 ### 22.2 Inspección estática del código
 
 **Ruta de creación de RemotePlayer (única):**
 
-`RemotePlayer` se crea exclusivamente en `PlayerSync.applyRemoteState()` (`src/game/network/PlayerSync.ts:112`):
+`RemotePlayer` se crea exclusivamente en `PlayerSync.applyRemoteState()` (`src/game/network/PlayerSync.ts`):
 
 ```typescript
-private applyRemoteState(playerId: string, x: number, y: number, sitting: boolean): void {
+private applyRemoteState(playerId, x, y, sitting): void {
   if (!playerId || playerId === this.localPlayerId) return; // filtro propio
   if (!Number.isFinite(x) || !Number.isFinite(y) || typeof sitting !== 'boolean') return;
 
@@ -829,28 +825,116 @@ private applyRemoteState(playerId: string, x: number, y: number, sitting: boolea
 }
 ```
 
-Cada `RemotePlayer` se identifica por un `playerId` único. Si el mismo `playerId` llega múltiples veces, no se crea un segundo RemotePlayer sino que se actualiza el existente.
+Cada `RemotePlayer` se identifica por un `playerId` único. Con el mismo `playerId` no se duplica: se actualiza el existente. Por tanto, **dos RemotePlayer visibles implican dos `playerId` distintos** llegando por el canal de datos.
 
 **Ruta de creación de PlayerSync (única):**
 
-`PlayerSync` se crea exclusivamente en `RoomScene.startSync()` (`src/game/scenes/RoomScene.ts:105`):
+`PlayerSync` se crea exclusivamente en `RoomScene.startSync()`. Cada instancia genera en su constructor un `localPlayerId` distinto (`generatePlayerId()`). **Dos PlayerSync → dos `localPlayerId` → el peer recibe estados de dos IDs → crea dos RemotePlayer.**
 
-```typescript
-private startSync(session: NetworkSession): void {
-  this.playerSync = new PlayerSync(this, session, this.player);
-  this.playerSync.start();
-}
+### 22.3 Causa raíz confirmada: doble notificación de sesión
+
+Existe una doble notificación de cambio de sesión para **UNA MISMA** `NetworkSession`:
+
+**Flujo de `ConnectMenu.handleCreate()` (bug):**
+
+```
+ConnectMenu.handleCreate()
+  -> this.session = createSession(handlers)
+  -> await this.session.createRoom()
+       -> NetworkSession.transportHandlers().onOpen()     // canal WebRTC abierto
+          -> this.status = 'connected'
+          -> handlers.onOpen()                            // ConnectMenu.buildHandlers().onOpen
+             -> setUIState('connected')
+             -> notifySessionChanged()                    // <- NOTIFICACIÓN #1
+             -> main.ts -> RoomScene.setNetworkSession(session)
+                -> startSync() -> PlayerSync #1 (localPlayerId P1)
+                     -> start() -> sendOwnState() -> player_state(playerId=P1)
+
+  ...createRoom() resuelve...
+  
+ConnectMenu.handleCreate()
+  -> setUIState('connected')
+  -> notifySessionChanged()                               // <- NOTIFICACIÓN #2 (misma sesión)
+  -> main.ts -> RoomScene.setNetworkSession(session)
+     -> playerSync.stop()                                 // detiene PlayerSync #1
+     -> new PlayerSync()                                  // PlayerSync #2 (localPlayerId P2)
+        -> player_state(playerId=P2)
 ```
 
-`startSync()` se invoca desde:
-1. `RoomScene.setNetworkSession(session)` — cuando la sesión cambia y el jugador ya existe
-2. `RoomScene.create()` — si hay una `pendingSession` (sesión establecida antes de que la escena terminara de crearse)
+Lo mismo ocurría en `handleJoin()`.
 
-**Reemplazo de PlayerSync en setNetworkSession:**
+**Archivos y líneas:**
+- `src/ui/connectMenu.ts` — `handleCreate()` (notificación tras resolución), `handleJoin()` (ídem), `buildHandlers().onOpen` (notificación dentro de onOpen)
+- `src/network/NetworkSession.ts` — `transportHandlers().onOpen` (estado `connected` + `handlers.onOpen`)
+- `src/game/scenes/RoomScene.ts` — `setNetworkSession()`, `startSync()`
+- `src/game/network/PlayerSync.ts` — `start()`, `stop()`, `generatePlayerId()`
+
+**`onRoomCreated` NO es la causa** y NO se tocó: solo muestra el código antes de que WebRTC termine (ver §20.3). La notificación de sesión conectada a `RoomScene` debe ocurrir UNA sola vez, cuando el canal P2P está abierto.
+
+### 22.4 Explicación del bug visual (por qué un RemotePlayer queda quieto)
+
+La secuencia en la pestaña A (remitente) con el bug:
+
+1. `onOpen` → `notifySessionChanged` → `PlayerSync #1` con `localPlayerId = P1`. `start()` envía `player_state(P1)` **sincrónicamente** (al menos una vez; el estado de NetworkSession ya es `connected`).
+2. `createRoom()` resuelve → `notifySessionChanged` → `PlayerSync #1.stop()` (limpia su timer) → `PlayerSync #2` con `localPlayerId = P2`. Envía `player_state(P2)` cada 100 ms.
+3. **P1 nunca vuelve a enviar estados** (el PlayerSync que lo usaba fue detenido). Tampoco se envía `player_disconnected(P1)`.
+
+En la pestaña B (receptor) con el bug:
+
+1. Recibe `player_state(P1)` → crea `RemotePlayer(P1)` en la posición de A en ese instante.
+2. Recibe `player_state(P2)` → crea `RemotePlayer(P2)`, que se actualiza a 10 Hz siguiendo a A.
+3. `RemotePlayer(P1)` no recibe más actualizaciones → **queda congelado** en la posición donde A estaba cuando se detuvo PlayerSync #1.
+
+Resultado simétrico en ambas pestañas: 1 local + 2 azules, uno moviéndose y otro quieto. **La causa raíz del segundo RemotePlayer es el doble ciclo de PlayerSync, no un defecto del Map ni de WebRTC.**
+
+### 22.5 Corrección aplicada (mínima)
+
+**Cambio 1 — `src/ui/connectMenu.ts` (`buildHandlers().onOpen`):**
+
+Se elimina `notifySessionChanged()` de `onOpen`. La única fuente de notificación de sesión conectada pasa a ser `handleCreate()`/`handleJoin()` tras la resolución de `createRoom()`/`joinRoom()` (donde la sesión ya está `connected`). `onOpen` solo actualiza el estado visual de la UI (`setUIState('connected')`).
+
+```typescript
+onOpen: () => {
+  this.setUIState('connected');
+  // Notificación de sesión la da handleCreate/handleJoin tras la resolución
+  // de createRoom/joinRoom. Aquí solo actualizamos el estado visual de la UI.
+},
+```
+
+Resultado conceptual:
+
+```
+create/join
+   ↓
+NetworkSession conecta
+   ↓
+onRoomCreated → solo UI muestra código
+   ↓
+WebRTC onOpen → UI estado "conectado" (sin notificar)
+   ↓
+createRoom/joinRoom resuelve
+   ↓
+UNA notificación de sesión conectada
+   ↓
+RoomScene.startSync()
+   ↓
+UN SOLO PlayerSync
+```
+
+**Cambio 2 — `src/game/scenes/RoomScene.ts` (`setNetworkSession`):**
+
+Defensa en profundidad contra dobles notificaciones de la misma sesión: se guarda la referencia de la sesión activa. Si llega de nuevo el **mismo** objeto de sesión, se ignora.
 
 ```typescript
 setNetworkSession(session: NetworkSession | null): void {
-  this.playerSync?.stop();  // detiene el anterior y elimina sus RemotePlayers
+  if (session) {
+    if (session === this.activeSession) return;
+    this.activeSession = session;
+  } else {
+    this.activeSession = null;
+  }
+
+  this.playerSync?.stop();
   this.playerSync = null;
 
   if (!session) return;
@@ -862,91 +946,42 @@ setNetworkSession(session: NetworkSession | null): void {
 }
 ```
 
-Antes de crear un nuevo `PlayerSync`, se llama `stop()` al anterior, que a su vez llama `removeAllRemote()`, destruyendo todos los `RemotePlayer` del mapa.
+**Cambio 3 — retirada de la instrumentación temporal** (`console.log` en `PlayerSync.ts` y `RoomScene.ts`) agregada en la intervención anterior de diagnóstico. Ya no es necesaria: la causa está confirmada y corregida.
 
-**Filtrado de mensajes propios:**
+**No se modificó:** `NetworkSession`, `RtcPeerTransport`, `SignalingClient`, `PlayerSync`, `RemotePlayer`, protocolo, chat. La arquitectura general se mantiene.
 
-```typescript
-if (!playerId || playerId === this.localPlayerId) return;
-```
+### 22.6 Pruebas
 
-Cada mensaje `player_state` cuyo `playerId` coincida con el `localPlayerId` del receptor se descarta. Esto impide que un peer vea su propio estado como un RemotePlayer.
+**Nuevo test `tests/connectMenu.test.ts`** (runner `node:test` + `tsx`):
 
-**Inspección de NetworkSession y RtcPeerTransport:**
+1. `handleCreate` notifica UNA sola vez al listener de sesión.
+2. `handleJoin` notifica UNA sola vez al listener de sesión.
+3. El código de sala (onRoomCreated) se muestra ANTES de onOpen (canal P2P).
+4. `handleDisconnect` limpia la sesión (notifica `null`).
+5. El chat sigue recibiendo mensajes remotos vía `onMessage` callback.
 
-- `NetworkSession` no crea `RemotePlayer` ni `PlayerSync`.
-- `RtcPeerTransport` solo maneja WebRTC (creación de `RTCPeerConnection` y `RTCDataChannel`).
-- El servidor de signaling (`signaling/server.mjs`) solo retransmite mensajes `signal` entre peers; no inspecta ni modifica mensajes P2P.
-- `MAX_PARTICIPANTS = 2` en el servidor de signaling limita a 2 peers por sala.
+El test usa un `MockSession` que reproduce el orden temporal real de `createRoom()`/`joinRoom()`: `onRoomCreated` (código visible) → `onOpen` (canal abierto) → resolución. Resultado: **5/5 PASS**.
 
-**Conclusión de la inspección estática:**
+**Nueva dependencia de desarrollo:** `tsx` (^4.23.13) para ejecutar tests sobre el código TypeScript real. Script: `npm test`.
 
-El código **no contiene** una ruta visible que pueda crear dos `RemotePlayer` con `playerId` distintos para el mismo peer en la misma conexión P2P.
+**Validación de regresiones (no regresamos):**
+- `npm run build` (TypeScript strict + Vite): **OK**.
+- Single-player sin red: sin cambios en `Player`, `CollisionSystem`, `Sofa`, `RoomScene.create()`.
+- Chat: `ChatPanel` no se tocó; enrutamiento `setMessageCallback` intacto (test 5).
+- Desconexión: `handleDisconnect`/`onPeerLeft` siguen notificando `null` (test 4).
 
-### 22.3 Hipótesis
+### 22.7 Verificación visual pendiente (usuario)
 
-Dado que la inspección estática no revela la causa, las hipótesis son:
+Esta corrección no se puede validar en este entorno (sin navegador). Por favor validar manualmente:
 
-1. **Duplicación de mensajes WebRTC:** El `RTCDataChannel` entrega mensajes duplicados bajo alguna condición de red (raro pero posible en WebRTC).
-2. **Sesión residual:** Si `handleCreate()` o `handleJoin()` se llaman múltiples veces en rápida sucesión, podría quedar un `PlayerSync` anterior sin limpiar correctamente.
-3. **Bug en el browser WebRTC:** Algún comportamiento inesperado del browser que cause mensajes extra.
-4. **Conexión a sala incorrecta:** El usuario podría estar conectado a una sala donde hay residuos de una sesión anterior.
+1. Arrancar signaling y servir el juego.
+2. Dos pestañas: crear sala en A, unirse en B.
+3. Confirmar que **en cada pestaña aparece SOLO 1 RemotePlayer azul** (no 2).
+4. Confirmar que el azul se mueve siguiendo al jugador de la otra pestaña.
+5. Confirmar que no queda ningún azul congelado.
+6. Confirmar que el código de sala aparece antes de "conectado".
+7. Confirmar que el chat y la desconexión siguen funcionando.
 
-### 22.4 Instrumentación temporal agregada
+### 22.8 Estado del bug
 
-Se agregó `console.log` en puntos críticos para capturar el ciclo de vida:
-
-**Archivos modificados:**
-- `src/game/network/PlayerSync.ts` — constructor, `start()`, `stop()`, `onMessage()`, `applyRemoteState()`
-- `src/game/scenes/RoomScene.ts` — `setNetworkSession()`, `startSync()`
-
-**Logs que se emitirán:**
-- Constructor: `[PlayerSync CREATED] localPlayerId: <id>`
-- `start()`: `[PlayerSync START] localPlayerId: <id>`
-- `stop()`: `[PlayerSync STOP] localPlayerId: <id> remoteCount: <n>`
-- `onMessage()`: `[onMessage] localPlayerId: <id> type: <type> playerId: <id>`
-- `applyRemoteState()`: `[applyRemoteState] localPlayerId: <id> received playerId: <id> x: <x> y: <y> remotePlayers.size: <n>` + `[applyRemoteState] CREATED RemotePlayer playerId: <id> total remotes: <n>`
-- `setNetworkSession()`: `[setNetworkSession] session: <null|provided> playerSync exists: <bool>`
-- `startSync()`: `[startSync] session.state: <state>`
-
-### 22.5 Prueba requerida
-
-Para reproducir el bug y capturar la instrumentación:
-
-1. Arrancar signaling: `cd signaling && node server.mjs`
-2. Servir juego: `npm run dev`
-3. Abrir pestaña A: crear sala
-4. Abrir pestaña B: unirse con el código
-5. **Importante:** Abrir DevTools (F12) → Console en **ambas** pestañas
-6. Mover el jugador en pestaña A
-7. Observar los logs en ambas pestañas
-
-**Logs esperados si el bug NO existe:**
-- Pestaña A: `[PlayerSync CREATED] localPlayerId: xxx`, `[applyRemoteState] received playerId: yyy`, `[applyRemoteState] CREATED RemotePlayer playerId: yyy`
-- Pestaña B: `[PlayerSync CREATED] localPlayerId: zzz`, `[applyRemoteState] received playerId: www`, `[applyRemoteState] CREATED RemotePlayer playerId: www`
-
-**Logs si el bug SÍ existe:**
-- Puede aparecer `[applyRemoteState] CREATED RemotePlayer playerId: <id2>` dos veces con `playerId` distintos
-- O puede aparecer un segundo `[PlayerSync CREATED]` inesperado
-
-### 22.6 Información necesaria del usuario
-
-Después de ejecutar la prueba, por favor proporcionar:
-
-1. **Logs completos de la consola de ambas pestañas** — especialmente las líneas que contienen:
-   - `[PlayerSync CREATED]`
-   - `[applyRemoteState] CREATED RemotePlayer`
-   - `[onMessage]`
-
-2. **Observación:** ¿Los dos RemotePlayer azules tienen posiciones iniciales distintas o تبدأ en la misma posición?
-
-3. **Comportamiento:** ¿El RemotePlayer quieto permanece en su lugar original aunque el jugador real se mueva?
-
-### 22.7 Siguiente paso
-
-Una vez que el usuario proporcione los logs de la instrumentación, se podrá determinar:
-- Si se crean dos RemotePlayer con distinto `playerId`
-- Si un mismo `playerId` se crea dos veces (lo cual sería un bug en el `Map`)
-- Si el problema está en WebRTC (browser)
-
-**Esta intervención NO implementa corrección alguna. Solo agrega instrumentación y documenta la investigación.**
+**Causa raíz encontrada y corregida.** Pendiente únicamente la confirmación visual del usuario en dos pestañas para cerrar M07-A definitivamente.
