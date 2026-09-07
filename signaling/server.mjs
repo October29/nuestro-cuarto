@@ -1,5 +1,6 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 const PORT = Number(process.env.SIGNALING_PORT ?? process.env.PORT ?? 8787);
 const CODE_LENGTH = 6;
@@ -7,108 +8,186 @@ const CODE_LENGTH = 6;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_PARTICIPANTS = 2;
 
-// Salas en memoria: roomCode -> { sockets: WebSocket[] }
-// El servidor solo empareja y retransmite; no conoce el estado de juego.
-const rooms = new Map();
+// ---------------------------------------------------------------------------
+// Room-first (Paso 1): ROOM != CONNECTION.
+//
+// La sala es una entidad server-owned con ciclo de vida propio, independiente
+// de los WebSockets. Existe mientras viva el proceso del servidor; las
+// conexiones son únicamente PRESENCIA momentánea dentro de la sala.
+//
+// roomCode -> { code, createdAt, sockets: [] }   (presencia = sockets vivos)
+//
+// Ciclo de vida de una sala:
+//   - create: genera un id permanente y registra la sala, añadiendo la
+//     presencia del creador.
+//   - join:  añade presencia. Se permite entrar aunque la sala esté vacía
+//     (es como se "vuelve a una sala" sin que haya nadie).
+//   - leave / cierre del WebSocket: solo quitan PRESENCIA. La sala y su id
+//     permanecen, ocurra lo que ocurra con los participantes: si queda alguien
+//     recibe peer-left y sigue dentro; si se va el último, la sala queda viva.
+//   - proceso del servidor terminando: las salas (memoria, aún sin disco) se
+//     pierden. La pérdida es del SERVIDOR, no de los clientes.
+//
+// leave vs disconnect:
+//   - "leave" (mensaje explícito del cliente) y desconexión del WebSocket
+//     producen el MISMO efecto sobre la sala: se retira la presencia y el
+//     resto queda igual. La diferencia es intencionalidad a nivel de cliente
+//     (botón "Salir" vs navegador cerrado), no de ciclo de vida de Room.
+//     No se introduce aquí ninguna política compleja de reconexión: en una
+//     fase posterior la distinción puede servir para marcar "presencia
+//     transitoria" frente a "ausencia intencional".
+// ---------------------------------------------------------------------------
 
-function generateCode(usedCodes) {
-  let code;
-  do {
-    const bytes = crypto.randomBytes(CODE_LENGTH);
-    code = Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('');
-  } while (usedCodes.has(code));
-  return code;
-}
+export function createSignalingServer(options = {}) {
+  const { port = PORT } = options;
+  const rooms = new Map();
+  const connected = new Set();
 
-function send(socket, data) {
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(data));
+  const wss = new WebSocketServer({ port });
+
+  function generateCode(usedCodes) {
+    let code;
+    do {
+      const bytes = crypto.randomBytes(CODE_LENGTH);
+      code = Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('');
+    } while (usedCodes.has(code));
+    return code;
   }
-}
 
-function otherPeer(room, socket) {
-  return room.sockets.find((s) => s !== socket);
-}
-
-function handleClose(socket) {
-  const roomCode = socket.roomCode;
-  if (!roomCode) return;
-
-  const room = rooms.get(roomCode);
-  if (room) {
-    const peer = otherPeer(room, socket);
-    if (peer) {
-      send(peer, { type: 'peer-left' });
+  function send(socket, data) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(data));
     }
-    rooms.delete(roomCode);
-    console.log(`sala cerrada: ${roomCode}`);
   }
 
-  socket.roomCode = undefined;
-}
+  function roomBySocket(socket) {
+    const code = socket.roomCode;
+    return code ? rooms.get(code) : undefined;
+  }
 
-const wss = new WebSocketServer({ port: PORT });
+  function otherPresentPeer(room, socket) {
+    return room.sockets.find((s) => s !== socket && s.readyState === WebSocket.OPEN);
+  }
 
-wss.on('connection', (socket) => {
-  socket.on('message', (raw) => {
-    let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      send(socket, { type: 'error', message: 'mensaje inválido' });
-      return;
+  function addPresence(code, socket) {
+    const room = rooms.get(code);
+    room.sockets.push(socket);
+    socket.roomCode = code;
+  }
+
+  // Retira la presencia (leave explícito o cierre del socket) sin tocar la
+  // sala. Si queda alguien, se le avisa con peer-left.
+  function removePresence(room, socket) {
+    const index = room.sockets.indexOf(socket);
+    if (index === -1) return;
+    room.sockets.splice(index, 1);
+    const peer = room.sockets.find((s) => s.readyState === WebSocket.OPEN);
+    if (peer) send(peer, { type: 'peer-left' });
+  }
+
+  function handleClose(socket) {
+    const room = roomBySocket(socket);
+    if (room) {
+      removePresence(room, socket);
+      console.log(`presencia retirada (socket cerrado): ${room.code}`);
     }
+    socket.roomCode = undefined;
+  }
 
-    switch (msg && msg.type) {
-      case 'create': {
-        if (socket.roomCode) return;
-        const roomCode = generateCode(new Set(rooms.keys()));
-        rooms.set(roomCode, { sockets: [socket] });
-        socket.roomCode = roomCode;
-        send(socket, { type: 'created', roomCode });
-        console.log(`sala creada: ${roomCode}`);
-        break;
+  wss.on('connection', (socket) => {
+    connected.add(socket);
+
+    socket.on('message', (raw) => {
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        send(socket, { type: 'error', message: 'mensaje inválido' });
+        return;
       }
 
-      case 'join': {
-        if (socket.roomCode) return;
-        const code = typeof msg.roomCode === 'string' ? msg.roomCode.toUpperCase() : '';
-        const room = rooms.get(code);
-        if (!room) {
-          send(socket, { type: 'error', message: 'sala no encontrada' });
-          return;
+      switch (msg && msg.type) {
+        case 'create': {
+          if (socket.roomCode) return;
+          const roomCode = generateCode(new Set(rooms.keys()));
+          rooms.set(roomCode, { code: roomCode, createdAt: Date.now(), sockets: [] });
+          addPresence(roomCode, socket);
+          send(socket, { type: 'created', roomCode });
+          console.log(`sala creada: ${roomCode}`);
+          break;
         }
-        if (room.sockets.length >= MAX_PARTICIPANTS) {
-          send(socket, { type: 'error', message: 'sala llena' });
-          socket.close();
-          return;
-        }
-        room.sockets.push(socket);
-        socket.roomCode = code;
-        send(socket, { type: 'joined', roomCode: code });
-        send(otherPeer(room, socket), { type: 'peer-joined' });
-        console.log(`participante unido: ${code}`);
-        break;
-      }
 
-      case 'signal': {
-        const room = socket.roomCode ? rooms.get(socket.roomCode) : undefined;
-        const peer = room && otherPeer(room, socket);
-        if (peer) {
-          send(peer, { type: 'signal', data: msg.data });
+        case 'join': {
+          if (socket.roomCode) return;
+          const code = typeof msg.roomCode === 'string' ? msg.roomCode.toUpperCase() : '';
+          const room = rooms.get(code);
+          if (!room) {
+            send(socket, { type: 'error', message: 'sala no encontrada' });
+            return;
+          }
+          if (room.sockets.length >= MAX_PARTICIPANTS) {
+            send(socket, { type: 'error', message: 'sala llena' });
+            socket.close();
+            return;
+          }
+          addPresence(code, socket);
+          send(socket, { type: 'joined', roomCode: code });
+          const peer = otherPresentPeer(room, socket);
+          if (peer) send(peer, { type: 'peer-joined' });
+          console.log(`participante unido: ${code}`);
+          break;
         }
-        break;
-      }
 
-      default:
-        send(socket, { type: 'error', message: 'tipo de mensaje desconocido' });
-    }
+        case 'leave': {
+          const room = roomBySocket(socket);
+          if (room) {
+            removePresence(room, socket);
+            console.log(`participante salió (leave): ${room.code}`);
+          }
+          socket.roomCode = undefined;
+          break;
+        }
+
+        case 'signal': {
+          const room = roomBySocket(socket);
+          const peer = room ? otherPresentPeer(room, socket) : undefined;
+          if (peer) {
+            send(peer, { type: 'signal', data: msg.data });
+          }
+          break;
+        }
+
+        default:
+          send(socket, { type: 'error', message: 'tipo de mensaje desconocido' });
+      }
+    });
+
+    socket.on('close', () => {
+      connected.delete(socket);
+      handleClose(socket);
+    });
+    socket.on('error', () => socket.close());
   });
 
-  socket.on('close', () => handleClose(socket));
-  socket.on('error', () => socket.close());
-});
+  function close() {
+    for (const socket of connected) {
+      if (socket.readyState === WebSocket.OPEN) socket.close();
+    }
+    connected.clear();
+    rooms.clear();
+    wss.close();
+  }
 
-wss.on('listening', () => {
-  console.log(`signaling escuchando en ws://0.0.0.0:${PORT}`);
-});
+  return { wss, close };
+}
+
+function startFromCLI() {
+  const { wss } = createSignalingServer({ port: PORT });
+  wss.on('listening', () => {
+    console.log(`signaling escuchando en ws://0.0.0.0:${PORT}`);
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startFromCLI();
+}

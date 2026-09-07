@@ -22,7 +22,17 @@ export interface SignalingRelayMessage {
   data: SignalPayload;
 }
 
-export type ClientSignalingMessage = SignalingCreateMessage | SignalingJoinMessage | SignalingRelayMessage;
+// Abandono explícito de la sala (Paso 1 Room-first). En el servidor quita la
+// presencia sin eliminar la sala; el peer restante recibe peer-left.
+export interface SignalingLeaveMessage {
+  type: 'leave';
+}
+
+export type ClientSignalingMessage =
+  | SignalingCreateMessage
+  | SignalingJoinMessage
+  | SignalingRelayMessage
+  | SignalingLeaveMessage;
 
 // --- Signaling: servidor → cliente ---
 
