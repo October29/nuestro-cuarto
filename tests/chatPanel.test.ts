@@ -29,13 +29,37 @@ function buildChat() {
 
 function pressEnterOn(target = getElement('chat-input')): void {
   for (const fn of target.listeners['keydown'] ?? []) {
-    (fn as unknown as (e: unknown) => void)({ key: 'Enter', preventDefault: () => undefined });
+    (fn as unknown as (e: unknown) => void)(
+      { key: 'Enter', preventDefault: () => undefined, stopPropagation: () => undefined },
+    );
   }
 }
 
 function pressDocumentEnter(): void {
   for (const fn of getDocumentListeners('keydown')) {
     (fn as unknown as (e: unknown) => void)({ key: 'Enter', preventDefault: () => undefined });
+  }
+}
+
+/**
+ * Simula la propagación real de un keydown del chat hacia document: primero se
+ * llaman los listeners del input; si el evento se propaga (no se llama a
+ * stopPropagation), se llama después al listener global de document.
+ */
+function pressEnterChatPropagating(target = getElement('chat-input')): void {
+  let stopped = false;
+  const event = {
+    key: 'Enter',
+    preventDefault: () => undefined,
+    stopPropagation: () => {
+      stopped = true;
+    },
+  };
+  for (const fn of target.listeners['keydown'] ?? []) {
+    (fn as unknown as (e: unknown) => void)(event);
+  }
+  if (!stopped) {
+    pressDocumentEnter();
   }
 }
 
@@ -103,26 +127,32 @@ describe('ChatPanel: comportamiento definitivo de Enter (fix chat)', () => {
     assert.equal(input.value, '');
   });
 
-  it('Enter con solo whitespace NO envía y hace blur', () => {
+  it('Enter con solo whitespace NO envía y hace blur; el global NO vuelve a enfocar', () => {
     const { session, input } = buildChat();
     setActiveElement(input);
     input.value = '   ';
+    const focusBefore = input.focusCount;
 
-    pressEnterOn(input);
+    // Simula la propagación completa (input → document): el listener del input
+    // hace blur() y stopPropagation(), así el global no debe volver a enfocar.
+    pressEnterChatPropagating(input);
 
     assert.equal(session.sent.length, 0, 'whitespace solo no debe enviarse');
     assert.equal(input.blurCount, 1, 'con whitespace debe hacerse blur');
+    assert.equal(input.focusCount, focusBefore, 'el listener global no debe volver a enfocar tras blur');
   });
 
-  it('Enter vacío NO envía y hace blur', () => {
+  it('Enter vacío NO envía y hace blur; el global NO vuelve a enfocar', () => {
     const { session, input } = buildChat();
     setActiveElement(input);
     input.value = '';
+    const focusBefore = input.focusCount;
 
-    pressEnterOn(input);
+    pressEnterChatPropagating(input);
 
     assert.equal(session.sent.length, 0, 'vacío no debe enviarse');
     assert.equal(input.blurCount, 1, 'con vacío debe hacerse blur');
+    assert.equal(input.focusCount, focusBefore, 'el listener global no debe volver a enfocar tras blur');
   });
 
   it('NUNCA envía mensajes que sean solo whitespace (camino del botón Enviar)', () => {

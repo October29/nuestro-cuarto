@@ -96,6 +96,10 @@ export class ChatPanel {
   private handleInputKeydown(event: KeyboardEvent): void {
     if (event.key === 'Enter') {
       event.preventDefault();
+      // Evita que el evento siga propagándose al listener global de document:
+      // si aquí hacemos blur(), ese listener ya no debe volver a enfocar el
+      // chat (ver bug del Enter vacío/whitespace).
+      event.stopPropagation();
       // Con texto → enviar y conservar el foco. Sin texto útil → blur.
       if (this.input.value.trim().length > 0) {
         this.handleSend();

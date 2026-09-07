@@ -1211,3 +1211,43 @@ Nuevos/actualizados para cubrir lo pedido:
 ### 25.7 Estado del bug
 
 **Corregido** (E capturada → sin captura + guardia de foco; Enter reglado explícitamente). El comportamiento de E se testea en Node con inyección de la API Phaser; la parte visual (letra E visible en el chat, interacción normal al jugar) queda pendiente de la confirmación manual del usuario.
+
+---
+
+## 26. Incidencia: el chat vacío/whitespace recupera el focus al hacer blur con Enter
+
+### 26.1 Observación y causa
+
+Tras la verificación manual de `1aca373`, quedó un único bug: con el chat enfocado y **vacío o solo whitespace**, al pulsar Enter el input **recibía el focus de nuevo inmediatamente** después del `blur()`, por lo que el usuario nunca veía que el chat perdiera el foco.
+
+Causa: en `ChatPanel` conviven dos listeners de `keydown`:
+
+1. el del propio input del chat, y
+2. el listener **global de `document`** (que enfoca el chat cuando ningún editable tiene el foco).
+
+Al pulsar Enter vacío, el listener del input hacía `blur()`, pero el evento seguía propagándose hacia `document`; el listener global veía entonces `document.activeElement` sin campo editable y ejecutaba `focusChatInput()`, provocando `blur() → listener global → focus()`.
+
+### 26.2 Corrección
+
+En `ChatPanel.handleInputKeydown()`, para Enter, tras `event.preventDefault()` se añade `event.stopPropagation()`: el evento ya no llega al listener global y el `blur()` se conserva:
+
+```typescript
+if (event.key === 'Enter') {
+  event.preventDefault();
+  event.stopPropagation();
+  if (this.input.value.trim().length > 0) {
+    this.handleSend();
+  } else {
+    this.input.blur();
+  }
+}
+```
+
+No se toca el resto de la arquitectura: WASD (§23), E (§25), Enter en `room-code-input`, y el Enter sin foco editable (que sigue enfocando por el listener global, ya que ahí no hay `stopPropagation`).
+
+### 26.3 Tests
+
+- `tests/chatPanel.test.ts`: `pressEnterChatPropagating()` simula la propagación real (input → document, con respeto a `stopPropagation`) y los tests de "Enter vacío" y "Enter solo whitespace" ahora verifican que tras el `blur()` el **listener global NO vuelve a enfocar** (`focusCount` sin cambios).
+- Entran en conflicto con la regresión ninguna prueba anterior: el Enter con texto sigue enviando/limpiando/conservando foco.
+
+**Resultado: `npm test` → 26/26 PASS.** `npm run build` (TypeScript strict + Vite) → **OK**.
