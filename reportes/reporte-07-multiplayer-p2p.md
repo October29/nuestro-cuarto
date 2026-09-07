@@ -985,3 +985,134 @@ Esta corrección no se puede validar en este entorno (sin navegador). Por favor 
 ### 22.8 Estado del bug
 
 **Causa raíz encontrada y corregida.** Pendiente únicamente la confirmación visual del usuario en dos pestañas para cerrar M07-A definitivamente.
+
+---
+
+## 23. Incidencia: W/A/S/D no se escriben en el chat mientras está enfocado
+
+### 23.1 Observación del usuario (prueba manual tras `40c7905`)
+
+Con `#chat-input` enfocado:
+
+- (bien) W/A/S/D **ya no mueven** al Player.
+- (mal) las teclas **tampoco se escriben** en el input del chat.
+
+Se pidió investigar por qué Phaser/Keyboard Manager captura WASD cuando un input del DOM tiene el foco, y corregirlo para que W/A/S/D escriban normalmente sin reactivar el movimiento del Player.
+
+### 23.2 Causa raíz (confirmada en el código de Phaser 4.2.1)
+
+No tiene que ver con el foco del DOM: **Phaser captura esas teclas de forma global a nivel de `window` y llama `event.preventDefault()` sin mirar dónde está el foco**.
+
+En `src/game/scenes/RoomScene.ts`:
+
+```typescript
+this.cursors = this.input.keyboard!.createCursorKeys();
+this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as WasdKeys;
+```
+
+El default de `addKey`/`addKeys`/`createCursorKeys` es `enableCapture = true` (`node_modules/phaser/src/input/keyboard/KeyboardPlugin.js:491-493`, `:486`). Cada tecla añadida se registra en `KeyboardManager.captures` (`KeyboardPlugin.js:530-533`, `:513`) y pone `manager.preventDefault = true`.
+
+Después, el listener de `keydown` del `KeyboardManager` (colocado en `window`, fase de burbujeo, sin mirar el foco) hace:
+
+```javascript
+if (_this.preventDefault && !modified && _this.captures.indexOf(event.keyCode) > -1) {
+    event.preventDefault();
+}
+```
+
+(`node_modules/phaser/src/input/keyboard/KeyboardManager.js:200-202` y `:220-222`).
+
+Ese `preventDefault` cancela la inserción de texto del navegador, por lo que W/A/S/D (y flechas/espacio/Shift de `createCursorKeys`) **nunca llegan a `#chat-input`**. En todo el código de entrada de Phaser **no existe ninguna comprobación del foco del DOM** (grep confirmado).
+
+### 23.3 Corrección (dos cambios independientes)
+
+**1. Dejar de interferir con el navegador** — `RoomScene.create()`:
+
+```typescript
+this.cursors = this.input.keyboard!.createCursorKeys();
+this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as WasdKeys;
+this.input.keyboard!.clearCaptures();
+```
+
+`clearCaptures()` (`KeyboardPlugin.js:386` → `KeyboardManager.js:408-412`) elimina todas las capturas y pone `preventDefault = false`. Ya no se cancela la escritura en inputs. **No se pierde el seguimiento de teclas**: los `Key` siguen registrando `isDown` a través del mismo listener de `window`; el movimiento por teclado funciona igual.
+
+**2. Guardia explícita de movimiento mientras se escribe** — nuevo módulo `src/ui/domFocus.ts`:
+
+```typescript
+export function isEditableElement(element: unknown): boolean { ... }
+export function isEditableFocused(): boolean { ... }
+```
+
+revisa si el foco del navegador está en un `INPUT`/`TEXTAREA`/`SELECT` o en un elemento `contentEditable`. En `RoomScene.getPlayerInput()`:
+
+```typescript
+if (isEditableFocused()) {
+  return { up: false, down: false, left: false, right: false };
+}
+```
+
+Esta guardia no acopla `ChatPanel` con `Player`: es solo una lectura del foco del DOM. Con esto el resultado queda **determinista**: mientras se escribe, el teclado es del input (las teclas llegan) y el Player no se mueve. Nota: la observación de que el movimiento se había detenido "solo" tras `40c7905` no se explica por análisis estático (Phaser sí capturaba las teclas); la guardia explícita hace ese bloqueo garantizado con independencia de lo que hiciera el navegador.
+
+### 23.4 Pruebas
+
+Nuevo test `tests/domFocus.test.ts` (runner `node:test` + `tsx`): reconoce INPUT/TEXTAREA/SELECT/contentEditable, descarta DIV/canvas/valores no-DOM, y `isEditableFocused()` distingue foco editable vs foco normal, con y sin `document` (null-safe en Node). Resultado: **13/13 PASS** (5 de ConnectMenu + 8 de domFocus).
+
+`npm run build` (TypeScript strict + Vite): **OK**.
+
+### 23.5 Verificación visual pendiente (usuario)
+
+1. Arrancar signaling y servir el juego, crear sala A y unirse B.
+2. Clic en el input del chat de una pestaña y escribir con las teclas **w a s d**: las letras deben aparecer en el input.
+3. Confirmar que mientras el input tiene el foco, el Player **no se mueve** con WASD (pero sí con el ratón).
+4. Pulsar **Escape** o un clic fuera y confirmar que WASD vuelve a mover al Player con normalidad.
+
+### 23.6 Estado del bug
+
+**Causa raíz encontrada y corregida** (doble corrección). Pendiente confirmación visual del usuario.
+
+---
+
+## 24. Incidencia: RemotePlayer duplicado visible solo en el HOST
+
+### 24.1 Observación del usuario (prueba manual tras `40c7905`)
+
+- El **HOST** ve **2 RemotePlayers azules**: uno que se mueve siguiendo al visitor y **otro estático**.
+- El **VISITOR** ve **1 solo RemotePlayer azul** (móvil).
+
+Se pidió **investigar el flujo del host** de forma específica (no asumir que `40c7905` lo arregló, no inventar una causa, no aplicar un parche tipo "si soy host, no creo X").
+
+### 24.2 Análisis estático
+
+El host ve dos RemotePlayers ⟹ el mapa `remotePlayers` del host recibió `player_state` con **2 `playerId` distintos**. Su único peer es el visitor ⟹ el visitor emite **2 `playerId` locales distintos** ⟹ es consistente con que en el visitor existan **2 `PlayerSync`** (o 2 sesiones/2 notificaciones). Un `PlayerSync` detenido nunca envía `player_disconnected`, así que su RemotePlayer quedaría congelado como ghost.
+
+`40c7905` eliminó la doble notificación en el flujo (y añadió la guardia `session === activeSession`), pero la guardia por referencias (`NetworkSession.ts`/`RoomScene.ts`) **solo protege contra el mismo objeto de sesión**: una segunda `setNetworkSession` con un objeto **distinto** aún crearía otro PlayerSync. El análisis puramente estático **no basta** para explicar una incidencia exclusiva del host, así que se agrega **instrumentación temporal** para que la prueba manual de dos pestañas la localice.
+
+### 24.3 Instrumentación temporal (SOLO diagnóstico)
+
+Logs con prefijo `[M07A-DIAG]`, con marca de tiempo y etiqueta HOST/VISITOR obtenida de `session.role` cuando hay sesión:
+
+| Dónde | Eventos registrados | Responde a |
+|---|---|---|
+| `NetworkSession` (`diagId` por instancia) | `NetworkSession created` · `createRoom resolvió` · `joinRoom resolvió` | ¿Cuántas NetworkSession existen por lado y su rol? |
+| `RtcPeerTransport` | `startHostNegotiation` · `onOpen` (label del canal) | ¿Existe un segundo DataChannel/negociación? |
+| `PlayerSync` | `PlayerSync CREATED` · `START` · `STOP` · `player_state RECEIVED` (con `playerId`) · `RemotePlayer CREATED` (con `count`) · `RemotePlayer REMOVED` · `player_disconnected RECEIVED` | ¿Cuántas PlayerSyncs/localPlayerIds hay? ¿Cuándo se crea el ghost (antes/después de abrir WebRTC)? ¿Algún `playerId` deja de enviar? ¿El host recibe su propio estado? |
+| `RoomScene` | `setNetworkSession` (prev/next `diagId`, same) · `startSync` (session) | ¿Se llama setNetworkSession con sesiones distintas? |
+| `ConnectMenu` | `notifySessionChanged` (session) | ¿Hay notificaciones dobles o segundas sesiones? |
+| `main.ts` | `onSessionChange` (session) | Enrutado de la sesión |
+
+El log de `player_state RECEIVED` está **antes** del filtro del `playerId` propio, para que se vean todos los estados recibidos (incluido el propio si se enviara).
+
+### 24.4 Prueba manual para el diagnóstico (usuario)
+
+1. Arrancar signaling (`npm run signaling` o el comando habitual) y servir la app.
+2. Abrir **dos pestañas**: A crea sala, B se une.
+3. En cada pestaña abrir **DevTools → Console** y **copiar y pegar todo el texto** de los logs `[M07A-DIAG]`.
+4. Esperar ~10 segundos (para acumular `player_state`) y mover al jugador en ambas.
+5. Enviar un mensaje de chat y usar **Salir de la sala** en una pestaña.
+6. Pasar los logs de ambas pestañas al agente con sus etiquetas (`[HOST]` / `[VISITOR]`).
+
+Tras el diagnóstico, esta sección se cierra con la causa confirmada y la instrumentación se retira.
+
+### 24.5 Estado del bug
+
+**En investigación.** Instrumentación temporal agregada y pendiente de la prueba manual del usuario. Sin cambios de comportamiento: `40c7905` (una sola notificación, una sola PlayerSync, create/join/chat/disconnect) se mantiene intacto y verificado por los 13 tests + build.

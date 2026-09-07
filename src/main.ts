@@ -17,6 +17,11 @@ connectMenu.setMessageCallback((message) => {
 });
 
 connectMenu.onSessionChange((session) => {
+  const sessionId = (session as { diagId?: number } | null)?.diagId ?? null;
+  console.log(
+    `[M07A-DIAG] [${new Date().toISOString()}] [onSessionChange]`,
+    JSON.stringify({ session: sessionId }),
+  );
   if (session) {
     chatPanel.bindSession(session);
   } else {

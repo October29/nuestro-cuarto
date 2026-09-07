@@ -41,6 +41,10 @@ export interface NetworkSessionOptions {
   ) => NetworkTransport;
 }
 
+// Instrumentación temporal M07-A: contador para distinguir instancias de
+// NetworkSession en los logs de diagnóstico del RemotePlayer duplicado.
+let nextDiagId = 0;
+
 /**
  * Capa de sesión: orquesta signaling + transporte y expone un punto único de
  * entrada a la red con mensajes tipados.
@@ -59,12 +63,17 @@ export class NetworkSession {
   private code: string | null = null;
   private sessionRole: SessionRole | null = null;
 
+  /** Instrumentación temporal M07-A: id de diagnóstico de esta instancia. */
+  readonly diagId = ++nextDiagId;
+
   constructor(options: NetworkSessionOptions) {
     this.handlers = options.handlers;
     this.signaling = new SignalingClient(options.signalingUrl);
     this.makeTransport =
       options.makeTransport ??
       ((signaling, handlers, role) => new RtcPeerTransport(signaling, handlers, role));
+
+    diagLog('NetworkSession created', { diagId: this.diagId });
   }
 
   get state(): SessionState {
@@ -92,6 +101,7 @@ export class NetworkSession {
       this.handlers.onRoomCreated?.(code);
       this.transport = this.makeTransport(this.signaling, this.transportHandlers(), 'host');
       await this.transport.connect();
+      diagLog('NetworkSession createRoom resolvió', { diagId: this.diagId, role: 'host', roomCode: code });
       return code;
     } catch (error) {
       this.fail(error);
@@ -112,6 +122,7 @@ export class NetworkSession {
       this.handlers.onRoomCreated?.(roomCode);
       this.transport = this.makeTransport(this.signaling, this.transportHandlers(), 'visitor');
       await this.transport.connect();
+      diagLog('NetworkSession joinRoom resolvió', { diagId: this.diagId, role: 'visitor', roomCode });
     } catch (error) {
       this.fail(error);
       throw error;
@@ -162,4 +173,8 @@ export class NetworkSession {
     this.status = 'error';
     this.handlers.onError(error instanceof Error ? error : new Error(String(error)));
   }
+}
+
+function diagLog(event: string, extra: Record<string, unknown>): void {
+  console.log(`[M07A-DIAG] [${new Date().toISOString()}] ${event}`, JSON.stringify(extra));
 }

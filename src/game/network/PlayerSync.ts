@@ -38,6 +38,7 @@ export class PlayerSync {
     private readonly localPlayer: Player,
   ) {
     this.localPlayerId = generatePlayerId();
+    this.diag('PlayerSync CREATED', { session: this.session.diagId });
   }
 
   /** Identidad local estable generada para esta sesión. */
@@ -48,11 +49,13 @@ export class PlayerSync {
   /** Comienza el envío periódico del estado local. */
   start(): void {
     this.sendOwnState();
+    this.diag('PlayerSync START');
     this.timer = setInterval(() => this.sendOwnState(), PLAYER_STATE_INTERVAL_MS);
   }
 
   /** Detiene el envío y elimina las representaciones remotas. */
   stop(): void {
+    this.diag('PlayerSync STOP');
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -70,8 +73,15 @@ export class PlayerSync {
   /** Maneja un mensaje P2P recibido (ya tipado y validado por la sesión). */
   onMessage(message: PeerMessage): void {
     if (message.type === 'player_state') {
+      this.diag('player_state RECEIVED', {
+        playerId: message.playerId,
+        x: message.x,
+        y: message.y,
+        sitting: message.sitting,
+      });
       this.applyRemoteState(message.playerId, message.x, message.y, message.sitting);
     } else if (message.type === 'player_disconnected') {
+      this.diag('player_disconnected RECEIVED', { playerId: message.playerId });
       this.removeRemote(message.playerId);
     }
   }
@@ -112,6 +122,7 @@ export class PlayerSync {
       remote = new RemotePlayer(this.scene, playerId, x, y);
       remote.setDepth(1);
       this.remotePlayers.set(playerId, remote);
+      this.diag('RemotePlayer CREATED', { playerId, count: this.remotePlayers.size });
     }
     remote.updateState(x, y, sitting);
   }
@@ -121,11 +132,22 @@ export class PlayerSync {
     if (!remote) return;
     remote.destroy();
     this.remotePlayers.delete(playerId);
+    this.diag('RemotePlayer REMOVED', { playerId, count: this.remotePlayers.size });
   }
 
   private removeAllRemote(): void {
     for (const playerId of [...this.remotePlayers.keys()]) {
       this.removeRemote(playerId);
     }
+  }
+
+  // Instrumentación temporal M07-A: rastro del ciclo de vida de la sync para
+  // diagnosticar el RemotePlayer duplicado visible SOLO en el host.
+  private diag(event: string, extra: Record<string, unknown> = {}): void {
+    const role = this.session.role === 'host' ? 'HOST' : this.session.role === 'visitor' ? 'VISITOR' : '?';
+    console.log(
+      `[M07A-DIAG] [${role}] [${new Date().toISOString()}] [PlayerSync ${event}]`,
+      JSON.stringify({ localPlayerId: this.localPlayerId, session: this.session.diagId, ...extra }),
+    );
   }
 }

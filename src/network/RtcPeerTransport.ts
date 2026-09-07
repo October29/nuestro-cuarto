@@ -108,6 +108,10 @@ export class RtcPeerTransport implements NetworkTransport {
     this.negotiationStarted = true;
     this.startNegotiationTimeout();
 
+    console.log(
+      `[M07A-DIAG] [${new Date().toISOString()}] [RtcPeerTransport startHostNegotiation] role=host`,
+    );
+
     this.channel = this.connection.createDataChannel(CHANNEL_LABEL);
     this.setupChannel(this.channel);
     void this.makeOffer();
@@ -196,6 +200,9 @@ export class RtcPeerTransport implements NetworkTransport {
   private setupChannel(channel: RTCDataChannel): void {
     channel.onopen = () => {
       this.status = 'open';
+      console.log(
+        `[M07A-DIAG] [${new Date().toISOString()}] [RtcPeerTransport onOpen] role=${this.role} label=${channel.label}`,
+      );
       if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
       this.openResolve?.();

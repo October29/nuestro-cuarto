@@ -71,6 +71,11 @@ export class ConnectMenu {
   }
 
   private notifySessionChanged(): void {
+    const sessionId = (this.session as { diagId?: number } | null)?.diagId ?? null;
+    console.log(
+      `[M07A-DIAG] [${new Date().toISOString()}] [ConnectMenu notifySessionChanged]`,
+      JSON.stringify({ session: sessionId }),
+    );
     for (const listener of this.sessionListeners) {
       listener(this.session);
     }
