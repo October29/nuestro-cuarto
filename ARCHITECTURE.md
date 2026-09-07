@@ -237,6 +237,72 @@ pathfinding, no hay gravedad ni simulación de físicas.
 
 ---
 
+Networking (M07 — prueba de concepto P2P)
+
+M07 introduce networking como prueba de concepto: dos navegadores comparten la
+misma habitación mediante una conexión P2P (WebRTC `RTCDataChannel`). No es una
+arquitectura multiplayer completa.
+
+Capas
+
+Gameplay                (RoomScene + Player + RemotePlayer + HUD)
+    │
+    ▼
+Networking abstraction  (NetworkSession + NetworkTransport)
+    │
+    ▼
+P2P transport           (RtcPeerTransport + SignalingClient)
+
+- `NetworkTransport`: interfaz `connect() / disconnect() / send() /
+  onMessage()` y estado de conexión.
+- `NetworkSession`: orquesta signaling + transporte, serializa/deserializa
+  los mensajes del protocolo y emite eventos tipados al juego
+  (playerConnected, playerState, playerDisconnected, chatMessage,
+  connectionClosed).
+- El juego y la UI consumen `NetworkSession` sin conocer detalles de WebRTC.
+  La gestión de signaling, WebRTC, serialización y eventos queda en la capa de
+  red.
+
+Modelo host/visitor (sin autoridad)
+
+- Host: crea la habitación e inicia la negociación WebRTC (`createOffer`).
+  No es autoridad de ningún estado compartido.
+- Visitor: se une con el código de conexión y responde con `answer`.
+- Cada cliente es autoridad de su propio Player. Ningún cliente valida ni
+  corrige la posición del otro. No hay servidor autoritativo ni reconcilia-
+  ción/anti-cheat en M07.
+
+Responsabilidad de la UI
+
+La UI (menú de conexión y chat, en HTML/DOM) se comunica únicamente con
+`NetworkSession`: solicitar crear/unirse, mostrar código y estado, enviar y
+mostrar texto. No contiene lógica de WebRTC ni conoce `RTCDataChannel`.
+
+Signaling
+
+Servidor Node/WebSocket mínimo en `signaling/` (dependencia única: `ws`).
+Solo empareja dos peers por código y retransmite SDP/ICE. No es servidor de
+juego ni guarda estado de juego.
+
+Single-player
+
+El modo single-player sigue siendo el flujo por defecto: la escena arranca y
+funciona exactamente igual sin conexión. El networking se habilita mediante la
+UI de conexión.
+
+Validación
+
+M07 se valida en tres etapas: M07-A (dos pestañas en la misma máquina),
+M07-B (dos dispositivos en la misma LAN) y M07-C (dos redes por Internet). El
+criterio de éxito real es M07-C. Las redes que requieran TURN se reportan como
+limitación de infraestructura; TURN queda fuera de M07.
+
+Esta capa es incremental: en un futuro la Fase 4 (servidor y estado
+compartido autoritativo) podrá sustituir o ampliar esta estructura sin acoplar
+Phaser al transporte.
+
+---
+
 Regla de arquitectura
 
 La arquitectura debe responder a las necesidades reales del proyecto.

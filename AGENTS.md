@@ -134,7 +134,7 @@ Antes de modificar código:
 Después de modificar código:
 
 - Comprueba que no haya errores de sintaxis.
-- Ejecuta las comprobaciones disponibles.
+- Ejecuta las comprobaciones disponibles (`npm test` para los tests de regresión y `npm run build` para el typecheck estricto + build de Vite).
 - Si existe un servidor de desarrollo, comprueba que la aplicación siga iniciándose.
 - Informa de cualquier problema que no hayas podido verificar.
 

@@ -5,6 +5,11 @@ import { Player, PlayerInput } from '../entities/Player';
 import { Sofa } from '../objects/Sofa';
 import { CollisionSystem } from '../physics/CollisionSystem';
 import { InteractionSystem } from '../systems/InteractionSystem';
+import { PlayerSync } from '../network/PlayerSync';
+import { isEditableFocused } from '../../ui/domFocus';
+
+import type { NetworkSession } from '../../network/NetworkSession';
+import type { PeerMessage } from '../../network/protocol';
 
 interface WasdKeys {
   W: Phaser.Input.Keyboard.Key;
@@ -18,6 +23,9 @@ export class RoomScene extends Phaser.Scene {
   private wasd!: WasdKeys;
   private player!: Player;
   private interactionSystem!: InteractionSystem;
+  private playerSync: PlayerSync | null = null;
+  private pendingSession: NetworkSession | null = null;
+  private activeSession: NetworkSession | null = null;
 
   constructor() {
     super('room');
@@ -42,6 +50,12 @@ export class RoomScene extends Phaser.Scene {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as WasdKeys;
 
+    // Phaser captura WASD/flechas a nivel de ventana y llama preventDefault a
+    // cualquier tecla capturada sin mirar el foco del DOM (esto impedía
+    // escribir con W/A/S/D en el chat). Al limpiar las capturas se deja de
+    // interferir con los inputs del navegador; Key.isDown sigue funcionando.
+    this.input.keyboard!.clearCaptures();
+
     const collisionSystem = new CollisionSystem();
 
     this.player = new Player(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 110, collisionSystem);
@@ -50,7 +64,7 @@ export class RoomScene extends Phaser.Scene {
     const sofa = new Sofa(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 230);
     collisionSystem.addObstacle(sofa);
 
-    this.interactionSystem = new InteractionSystem(this, this.player);
+    this.interactionSystem = new InteractionSystem(this, this.player, Phaser);
     this.interactionSystem.addInteractable(sofa);
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -62,6 +76,11 @@ export class RoomScene extends Phaser.Scene {
 
     this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+
+    if (this.pendingSession) {
+      this.startSync(this.pendingSession);
+      this.pendingSession = null;
+    }
   }
 
   update(_time: number, delta: number): void {
@@ -69,9 +88,57 @@ export class RoomScene extends Phaser.Scene {
 
     this.interactionSystem.update();
     this.player.update(delta, input, this.interactionSystem.getSeatedExitPoint());
+    this.playerSync?.update();
+  }
+
+  /** Vincula o desvincula la sesión activa de la red (null al salir/perderla). */
+  setNetworkSession(session: NetworkSession | null): void {
+    const prevId = (this.activeSession as { diagId?: number } | null)?.diagId ?? null;
+    const nextId = (session as { diagId?: number } | null)?.diagId ?? null;
+    console.log(
+      `[M07A-DIAG] [${new Date().toISOString()}] [RoomScene setNetworkSession]`,
+      JSON.stringify({ prevSession: prevId, nextSession: nextId, sameSession: prevId === nextId && nextId !== null }),
+    );
+
+    if (session) {
+      if (session === this.activeSession) return;
+      this.activeSession = session;
+    } else {
+      this.activeSession = null;
+    }
+
+    this.playerSync?.stop();
+    this.playerSync = null;
+
+    if (!session) return;
+    if (!this.player) {
+      this.pendingSession = session;
+      return;
+    }
+    this.startSync(session);
+  }
+
+  /** Reenvía los mensajes P2P de la sesión a la sincronización visual. */
+  handleNetworkMessage(message: PeerMessage): void {
+    this.playerSync?.onMessage(message);
+  }
+
+  private startSync(session: NetworkSession): void {
+    console.log(
+      `[M07A-DIAG] [${new Date().toISOString()}] [RoomScene startSync]`,
+      JSON.stringify({ session: session.diagId }),
+    );
+    this.playerSync = new PlayerSync(this, session, this.player);
+    this.playerSync.start();
   }
 
   private getPlayerInput(): PlayerInput {
+    // Mientras se escribe en un campo editable (chat, código de sala) el
+    // teclado es del input; el jugador no debe moverse.
+    if (isEditableFocused()) {
+      return { up: false, down: false, left: false, right: false };
+    }
+
     const { up, down, left, right } = this.cursors;
 
     return {

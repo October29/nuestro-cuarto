@@ -1,0 +1,14 @@
+{
+  "name": "nuestro-cuarto-signaling",
+  "version": "0.1.0",
+  "description": "Servidor mínimo de signaling WebSocket para Nuestro Cuartito (M07).",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
