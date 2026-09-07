@@ -85,6 +85,7 @@ export class RoomScene extends Phaser.Scene {
 
   /** Vincula o desvincula la sesión activa de la red (null al salir/perderla). */
   setNetworkSession(session: NetworkSession | null): void {
+    console.log('[setNetworkSession] session:', session ? 'provided' : 'null', 'playerSync exists:', !!this.playerSync);
     this.playerSync?.stop();
     this.playerSync = null;
 
@@ -102,6 +103,7 @@ export class RoomScene extends Phaser.Scene {
   }
 
   private startSync(session: NetworkSession): void {
+    console.log('[startSync] session.state:', session.state);
     this.playerSync = new PlayerSync(this, session, this.player);
     this.playerSync.start();
   }
