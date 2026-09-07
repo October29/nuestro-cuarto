@@ -6,9 +6,16 @@ import type { NetworkTransport, TransportHandlers } from './NetworkTransport';
 const CHANNEL_LABEL = 'game-net';
 export const NEGOTIATION_TIMEOUT_MS = 15000;
 
+// VENTANA DE RECUPERACIÓN (M08-C): cuando la conexión WebRTC se degrada porque
+// el peer suspende/recarga su pestaña, la sesión NO se destruye de inmediato.
+// Se mantiene un "hold" durante este margen esperando el `peer-resumed` del
+// signaling o el cierre autoritativo del servidor (`peer-left`). La gracia del
+// servidor (30 s) es la que decide: este hold es solo un respaldo si ese
+// mensaje se perdiera.
+const RECOVERY_HOLD_MS = 35000;
+
 // STUN público para descubrir la ruta por Internet.
-// TURN queda explícitamente fuera de M07 (limitación de infraestructura,
-// documentada en el reporte del milestone).
+// TURN queda explícitamente fuera (limitación de infraestructura).
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 export type TransportState = 'idle' | 'connecting' | 'open' | 'closed';
@@ -30,6 +37,7 @@ export class RtcPeerTransport implements NetworkTransport {
   private channel: RTCDataChannel | null = null;
   private unsubscribeSignaling: (() => void) | null = null;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private holdTimer: ReturnType<typeof setTimeout> | null = null;
   private openResolve: (() => void) | null = null;
   private openReject: ((error: Error) => void) | null = null;
   private status: TransportState = 'idle';
@@ -47,8 +55,13 @@ export class RtcPeerTransport implements NetworkTransport {
     return this.status;
   }
 
-  /** Negocia la conexión P2P y promete cuando el canal de datos está abierto. */
-  connect(): Promise<void> {
+  /**
+   * Negocia la conexión P2P y promete cuando el canal de datos está abierto.
+   * `initiate` arranca la negociación sin esperar `peer-resumed`: en una
+   * recuperación (resume) el signaling ya confirmó que el peer está activo, y
+   * el `peer-resumed` de arranque puede llegar antes de suscribirnos.
+   */
+  connect(options?: { initiate?: boolean }): Promise<void> {
     if (this.status === 'open') return Promise.resolve();
     if (this.status !== 'idle') return Promise.reject(new Error('transporte: no se puede conectar en este estado'));
 
@@ -61,40 +74,130 @@ export class RtcPeerTransport implements NetworkTransport {
         // arranca la negociación (corrección M07-A). Si el visitor ya estuviera
         // conectado antes, el offer nunca se perdería porque no se envía antes.
         this.startHostNegotiation();
+      } else if (message.type === 'peer-resumed') {
+        // M08-C: el peer volvió (o un host recuperado necesita arrancar).
+        this.handlePeerResumed();
+      } else if (message.type === 'peer-left') {
+        // El servidor cierra la sala de forma autoritativa: fin definitivo.
+        this.notifyClose('el peer abandonó la sala');
       }
     });
 
     return new Promise<void>((resolve, reject) => {
       this.openResolve = resolve;
       this.openReject = reject;
-
-      this.connection = new RTCPeerConnection({ iceServers: this.iceServers });
-      this.connection.onicecandidate = (event) => {
-        if (event.candidate) {
-          this.signaling.sendSignal({
-            kind: 'ice',
-            candidate: event.candidate.candidate,
-            sdpMid: event.candidate.sdpMid ?? undefined,
-            sdpMLineIndex: event.candidate.sdpMLineIndex ?? undefined,
-          });
-        }
-      };
-      this.connection.onconnectionstatechange = () => {
-        const state = this.connection?.connectionState;
-        if (state === 'failed') {
-          this.notifyClose('fallo de negociación (connectionState failed)');
-        } else if (state === 'disconnected') {
-          this.notifyClose('la conexión con el peer se ha perdido');
-        }
-      };
-
-      if (this.role === 'visitor') {
-        this.connection.ondatachannel = (event) => {
-          this.channel = event.channel;
-          this.setupChannel(event.channel);
-        };
+      this.connection = this.createPeerConnection();
+      if (options?.initiate && this.role === 'host') {
+        this.startHostNegotiation();
       }
     });
+  }
+
+  private createPeerConnection(): RTCPeerConnection {
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        this.signaling.sendSignal({
+          kind: 'ice',
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid ?? undefined,
+          sdpMLineIndex: event.candidate.sdpMLineIndex ?? undefined,
+        });
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === 'failed' || state === 'disconnected') {
+        this.handleConnectivityLost(state);
+      } else if (state === 'connected') {
+        // La conectividad volvió (por ejemplo un blip breve): cancelar el hold.
+        this.clearHold();
+      }
+    };
+
+    if (this.role === 'visitor') {
+      pc.ondatachannel = (event) => {
+        this.channel = event.channel;
+        this.setupChannel(event.channel);
+      };
+    }
+    return pc;
+  }
+
+  /**
+   * M08-C: una pérdida de conectividad WebRTC mientras la sesión estaba abierta
+   * ya no destruye la sesión. Se arma un hold y se espera a que el servidor
+   * decida: o llega `peer-resumed` (renegociar) o `peer-left` (cerrar).
+   */
+  private handleConnectivityLost(state: string): void {
+    if (this.closeNotified) return;
+    if (this.status === 'connecting') {
+      // Negociación inicial fallida: se mantiene el comportamiento previo.
+      if (state === 'failed') this.fail('fallo de negociación (connectionState failed)');
+      return;
+    }
+    if (this.status !== 'open') return;
+
+    this.clearHold();
+    this.holdTimer = setTimeout(
+      () => this.notifyClose(`el peer no ha regresado (${state})`),
+      RECOVERY_HOLD_MS,
+    );
+  }
+
+  private clearHold(): void {
+    if (this.holdTimer) {
+      clearTimeout(this.holdTimer);
+      this.holdTimer = null;
+    }
+  }
+
+  /**
+   * M08-C: el peer volvió a estar activo.
+   * - host en espera (connecting): arranca la negociación normal.
+   * - sesión abierta: se renegocia desde cero (nueva RTCPeerConnection +
+   *   offer/answer) reutilizando la regla de rol.
+   */
+  private handlePeerResumed(): void {
+    this.clearHold();
+    if (this.status === 'connecting' && this.role === 'host') {
+      this.startHostNegotiation();
+      return;
+    }
+    if (this.status === 'open') {
+      this.renegotiate();
+    }
+  }
+
+  /** Reinicia la negociación WebRTC desde cero sobre el mismo canal signaling. */
+  private renegotiate(): void {
+    if (this.timeoutTimer) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
+    }
+    this.closePeerConnection();
+    this.negotiationStarted = false;
+    this.connection = this.createPeerConnection();
+
+    if (this.role === 'host') {
+      this.channel = this.connection.createDataChannel(CHANNEL_LABEL);
+      this.setupChannel(this.channel);
+      this.startNegotiationTimeout();
+      void this.makeOffer();
+    }
+    // visitor: ondatachannel se configura en createPeerConnection; espera el offer.
+  }
+
+  private closePeerConnection(): void {
+    this.channel = null;
+    if (this.connection) {
+      try {
+        this.connection.close();
+      } catch {
+        // objeto ya cerrado
+      }
+      this.connection = null;
+    }
   }
 
   /**
@@ -138,6 +241,7 @@ export class RtcPeerTransport implements NetworkTransport {
   close(): void {
     this.status = 'closed';
     this.closeNotified = true;
+    this.clearHold();
     if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
     this.timeoutTimer = null;
     this.openReject?.(new Error('conexión cerrada localmente'));
@@ -203,6 +307,7 @@ export class RtcPeerTransport implements NetworkTransport {
       console.log(
         `[M07A-DIAG] [${new Date().toISOString()}] [RtcPeerTransport onOpen] role=${this.role} label=${channel.label}`,
       );
+      this.clearHold();
       if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
       this.openResolve?.();
@@ -218,7 +323,18 @@ export class RtcPeerTransport implements NetworkTransport {
       if (this.status === 'open') this.handlers.onError('error en el canal de datos');
     };
     channel.onclose = () => {
-      this.notifyClose('el peer cerró la conexión');
+      // M08-C: un cierre del canal mientras la sesión estaba abierta puede ser
+      // la suspensión del peer. Se permite la ventana de recuperación; el cierre
+      // definitivo lo decide el servidor (peer-left / expiración de la gracia).
+      if (this.status === 'open') {
+        this.clearHold();
+        this.holdTimer = setTimeout(
+          () => this.notifyClose('el peer cerró la conexión'),
+          RECOVERY_HOLD_MS,
+        );
+      } else {
+        this.notifyClose('el peer cerró la conexión');
+      }
     };
   }
 
@@ -243,6 +359,7 @@ export class RtcPeerTransport implements NetworkTransport {
     if (this.status !== 'connecting') return;
     this.closeNotified = true;
     this.status = 'closed';
+    this.clearHold();
     if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
     this.timeoutTimer = null;
     this.openReject?.(new Error(reason));
@@ -253,6 +370,7 @@ export class RtcPeerTransport implements NetworkTransport {
   }
 
   private cleanup(): void {
+    this.clearHold();
     this.unsubscribeSignaling?.();
     this.unsubscribeSignaling = null;
     this.channel = null;

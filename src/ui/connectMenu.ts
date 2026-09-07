@@ -1,4 +1,10 @@
 import { NetworkSession, type SessionHandlers, type SessionState } from '../network/NetworkSession';
+import {
+  clearSavedSession,
+  getOrCreateParticipantId,
+  loadSavedSession,
+  saveSession,
+} from '../network/SessionPersistence';
 import type { PeerMessage } from '../network/protocol';
 
 type StatusLabel = 'desconectado' | 'conectando...' | 'conectado' | 'desconectado (peer)' | 'error';
@@ -13,14 +19,15 @@ const STATUS_TEXT: Record<SessionState, StatusLabel> = {
 
 export interface ConnectMenuOptions {
   /** Cómo crear la sesión. Por defecto usa NetworkSession real; en pruebas se inyecta un mock. */
-  createSession?: (handlers: SessionHandlers) => NetworkSession;
+  createSession?: (handlers: SessionHandlers, participantId: string) => NetworkSession;
 }
 
 export class ConnectMenu {
   private session: NetworkSession | null = null;
   private onMessage: ((message: PeerMessage) => void) | null = null;
   private sessionListeners = new Set<(session: NetworkSession | null) => void>();
-  private readonly createSession: (handlers: SessionHandlers) => NetworkSession;
+  private readonly createSession: (handlers: SessionHandlers, participantId: string) => NetworkSession;
+  private readonly participantId: string;
   private currentState: SessionState = 'idle';
 
   private readonly createBtn: HTMLButtonElement;
@@ -33,7 +40,9 @@ export class ConnectMenu {
   private readonly errorMsg: HTMLDivElement;
 
   constructor(options: ConnectMenuOptions = {}) {
-    this.createSession = options.createSession ?? ((handlers) => new NetworkSession({ handlers }));
+    this.createSession =
+      options.createSession ?? ((handlers, participantId) => new NetworkSession({ handlers, participantId }));
+    this.participantId = getOrCreateParticipantId();
 
     this.createBtn = document.getElementById('create-room-btn') as HTMLButtonElement;
     this.codeDisplay = document.getElementById('room-code-display') as HTMLDivElement;
@@ -84,12 +93,15 @@ export class ConnectMenu {
   private async handleCreate(): Promise<void> {
     this.resetError();
     this.setUIState('connecting');
+    // El usuario empieza un flujo nuevo: descarta cualquier sesión guardada previa.
+    clearSavedSession();
 
     const handlers: SessionHandlers = this.buildHandlers();
-    this.session = this.createSession(handlers);
+    this.session = this.createSession(handlers, this.participantId);
 
     try {
       const code = await this.session.createRoom();
+      saveSession({ roomCode: code, role: 'host', participantId: this.participantId });
       this.codeText.textContent = code;
       this.codeDisplay.hidden = false;
       this.codeInput.disabled = true;
@@ -112,11 +124,13 @@ export class ConnectMenu {
     }
 
     this.setUIState('connecting');
+    clearSavedSession();
     const handlers: SessionHandlers = this.buildHandlers();
-    this.session = this.createSession(handlers);
+    this.session = this.createSession(handlers, this.participantId);
 
     try {
       await this.session.joinRoom(code);
+      saveSession({ roomCode: code, role: 'visitor', participantId: this.participantId });
       this.codeText.textContent = code;
       this.codeDisplay.hidden = false;
       this.codeInput.disabled = true;
@@ -130,9 +144,42 @@ export class ConnectMenu {
     }
   }
 
+  /**
+   * M08-C: recupera la sesión persistida tras una recarga del navegador.
+   * Reclama el slot en el signaling con la identidad guardada y vuelve a
+   * conectar el transporte. Si la sala ya no existe (gracia expirada), limpia
+   * el estado guardado y vuelve al menú.
+   */
+  async tryResume(): Promise<void> {
+    const saved = loadSavedSession();
+    if (!saved) return;
+    this.resetError();
+    this.setUIState('connecting');
+
+    const handlers: SessionHandlers = this.buildHandlers();
+    this.session = this.createSession(handlers, saved.participantId);
+
+    try {
+      await this.session.resume(saved.roomCode, saved.role);
+      saveSession({ roomCode: saved.roomCode, role: saved.role, participantId: saved.participantId });
+      this.codeText.textContent = saved.roomCode;
+      this.codeDisplay.hidden = false;
+      this.codeInput.disabled = true;
+      this.setUIState('connected');
+      this.notifySessionChanged();
+    } catch (error) {
+      this.session = null;
+      clearSavedSession();
+      this.showError(error instanceof Error ? `No se pudo recuperar la sesión: ${error.message}` : String(error));
+      this.setUIState('idle');
+      this.notifySessionChanged();
+    }
+  }
+
   private handleDisconnect(): void {
     this.session?.close();
     this.session = null;
+    clearSavedSession();
     this.codeDisplay.hidden = true;
     this.codeInput.disabled = false;
     this.codeInput.value = '';
@@ -151,6 +198,7 @@ export class ConnectMenu {
       onMessage: (message) => this.onMessage?.(message),
       onPeerLeft: (reason) => {
         this.session = null;
+        clearSavedSession();
         this.codeDisplay.hidden = true;
         this.codeInput.disabled = false;
         this.codeInput.value = '';

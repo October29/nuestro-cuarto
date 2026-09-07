@@ -10,11 +10,24 @@
 
 export interface SignalingCreateMessage {
   type: 'create';
+  participantId: string;
 }
 
 export interface SignalingJoinMessage {
   type: 'join';
   roomCode: string;
+  participantId: string;
+}
+
+export interface SignalingResumeMessage {
+  type: 'resume';
+  roomCode: string;
+  participantId: string;
+  role: 'host' | 'visitor';
+}
+
+export interface SignalingLeaveMessage {
+  type: 'leave';
 }
 
 export interface SignalingRelayMessage {
@@ -22,7 +35,12 @@ export interface SignalingRelayMessage {
   data: SignalPayload;
 }
 
-export type ClientSignalingMessage = SignalingCreateMessage | SignalingJoinMessage | SignalingRelayMessage;
+export type ClientSignalingMessage =
+  | SignalingCreateMessage
+  | SignalingJoinMessage
+  | SignalingResumeMessage
+  | SignalingLeaveMessage
+  | SignalingRelayMessage;
 
 // --- Signaling: servidor → cliente ---
 
@@ -49,6 +67,20 @@ export interface SignalingPeerLeftMessage {
   type: 'peer-left';
 }
 
+// Avisa al participante que su peer volvió a estar activo y que debe
+// renegociar la conexión WebRTC desde cero (M08-C).
+export interface SignalingPeerResumedMessage {
+  type: 'peer-resumed';
+}
+
+// Confirmación de un resume: la sala fue reocupada. peerActive indica si el
+// otro participante está conectado en este momento.
+export interface SignalingResumedMessage {
+  type: 'resumed';
+  roomCode: string;
+  peerActive: boolean;
+}
+
 export interface SignalingErrorMessage {
   type: 'error';
   message: string;
@@ -60,6 +92,8 @@ export type ServerSignalingMessage =
   | SignalingPeerJoinedMessage
   | SignalingRelayedMessage
   | SignalingPeerLeftMessage
+  | SignalingPeerResumedMessage
+  | SignalingResumedMessage
   | SignalingErrorMessage;
 
 // --- Payload de signaling (SDP offer/answer e ICE candidate) ---

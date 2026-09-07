@@ -1,31 +1,20 @@
 import { RemotePlayer } from '../entities/RemotePlayer';
 import { PLAYER_STATE_INTERVAL_MS } from '../config';
+import { getOrCreatePlayerId } from '../../network/SessionPersistence';
 
 import type { Player } from '../entities/Player';
 import type { NetworkSession } from '../../network/NetworkSession';
 import type { PeerMessage } from '../../network/protocol';
 import type Phaser from 'phaser';
 
-// Genera un id local estable durante una sesión. No requiere cuentas ni
-// autenticación: es solo un identificador de coordinación para el peer.
-function generatePlayerId(): string {
-  const random = (Math.random() + 1).toString(36).slice(2, 10);
-  return `player-${random}`;
-}
-
 /**
- * Conecta la NetworkSession con el juego:
+ * Genera un id local estable durante una sesión. No requiere cuentas ni
+ * autenticación: es solo un identificador de coordinación para el peer.
  *
- * - envía el estado del Player local (x, y, sitting) ~10 veces por segundo
- *   mientras hay sesión conectada;
- * - recibe el estado del peer y crea/actualiza el RemotePlayer correspondiente;
- * - elimina los RemotePlayers al desconectarse o salir de la sala.
- *
- * Cada cliente es autoridad únicamente de su propio Player: aquí solo se lee
- * el estado local y se replica el estado remoto. No se envían comandos de
- * movimiento remoto ni se corrige la posición del otro.
- *
- * Esta clase NO conoce WebRTC: únicamente consume NetworkSession y PeerMessage.
+ * M08-C: si la sesión viene de una recuperación (recarga), se reutiliza el
+ * playerId persistido; si no, se genera uno nuevo y se persiste para futuras
+ * recargas. Así el peer actualiza el mismo RemotePlayer en lugar de crear uno
+ * duplicado tras la recarga.
  */
 export class PlayerSync {
   private remotePlayers = new Map<string, RemotePlayer>();
@@ -36,8 +25,9 @@ export class PlayerSync {
     private readonly scene: Phaser.Scene,
     private readonly session: NetworkSession,
     private readonly localPlayer: Player,
+    playerId?: string,
   ) {
-    this.localPlayerId = generatePlayerId();
+    this.localPlayerId = playerId ?? getOrCreatePlayerId();
     this.diag('PlayerSync CREATED', { session: this.session.diagId });
   }
 

@@ -83,14 +83,31 @@ export class SignalingClient {
     });
   }
 
-  createRoom(): Promise<string> {
-    return this.exchange({ type: 'create' }, 'created', 'create').then(
+  createRoom(participantId: string): Promise<string> {
+    return this.exchange({ type: 'create', participantId }, 'created', 'create').then(
       (message) => (message as { type: 'created'; roomCode: string }).roomCode,
     );
   }
 
-  joinRoom(roomCode: string): Promise<void> {
-    return this.exchange({ type: 'join', roomCode }, 'joined', 'join').then(() => undefined);
+  joinRoom(roomCode: string, participantId: string): Promise<void> {
+    return this.exchange({ type: 'join', roomCode, participantId }, 'joined', 'join').then(() => undefined);
+  }
+
+  /**
+   * Recupera una sesión existente tras una recarga: el servidor reocupa el
+   * slot de este participante si está dentro de la ventana de gracia (M08-C).
+   * Resuelve con indica si el peer está conectado en ese momento.
+   */
+  resume(roomCode: string, participantId: string, role: 'host' | 'visitor'): Promise<{ peerActive: boolean }> {
+    return this.exchange({ type: 'resume', roomCode, participantId, role }, 'resumed', 'resume').then((message) => {
+      const m = message as { type: 'resumed'; roomCode: string; peerActive: boolean };
+      return { peerActive: m.peerActive };
+    });
+  }
+
+  /** Avisa al servidor de que el participante abandona la sala definitivamente. */
+  leave(): void {
+    this.send({ type: 'leave' });
   }
 
   sendSignal(data: SignalPayload): void {
@@ -148,6 +165,8 @@ export class SignalingClient {
       'peer-joined',
       'signal',
       'peer-left',
+      'peer-resumed',
+      'resumed',
       'error',
     ];
     const serverMsg = msg as ServerSignalingMessage;

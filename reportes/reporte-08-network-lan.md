@@ -1,6 +1,6 @@
-# Reporte 08 — Radiografía de Networking LAN (fase de análisis)
+# Reporte 08 — Radiografía de Networking LAN (M08-B) y recuperación de sesión (M08-C)
 
-**Estado:** Análisis. Sin cambios funcionales.
+**Estado:** Análisis (M08-B validado en LAN real) + implementación M08-C (recuperación tras suspensión/recarga).
 **Milestone:** M08
 **Rama de trabajo:** `milestone-08`
 **Fecha:** 2026-09-07
@@ -327,3 +327,136 @@ Ninguno falla; no hubo que arreglar nada.
   candidates host suelen bastar.
 - **Nunca se ha validado** la conexión entre dos dispositivos físicos: ese es
   el paso de verificación pendiente de M08-B.
+
+---
+
+## 12. M08-B — Prueba real LAN (PASS)
+
+Se validó la conexión entre **dos dispositivos físicos en la misma red Wi‑Fi**,
+cumpliendo el objetivo de M08-B:
+
+**Setup real probado:**
+- Tablet con Termux: sirve la página con Vite (`--host 0.0.0.0`, puerto 5173) y
+  ejecuta el servidor de signaling (`node signaling/server.mjs`, puerto 8787,
+  escucha en `0.0.0.0`).
+- Teléfono: abre `http://192.168.1.2:5173` (la IP LAN de la tablet), **no**
+  `localhost`.
+- Los puertos 8787 (TCP) y WebRTC (UDP) quedaron accesibles en la LAN local.
+
+**Resultado:** un dispositivo crea la sala, el otro la une con el código y la
+conexión P2P establece el canal de datos. 
+
+**Confirmación de las hipótesis de la fase de análisis:**
+- `location.hostname` apunta correctamente al signaling al abrir por IP LAN (no
+  hubo que cambiar nada de código para que la LAN funcione).
+- Los bloqueadores eran de **entorno/configuración** (firewall, abrir por IP
+  LAN, AP isolation), no de código.
+- WebRTC conectó con candidates host de la LAN; no hizo falta TURN.
+
+---
+
+## 13. M08-C — Recuperación de sesión tras suspensión/recarga del navegador
+
+### 13.1 Problema detectado
+
+Durante la prueba LAN real se detectó que, al **suspender el navegador o
+recargar la página**, la sesión se perdía: el WebSocket de signaling se cierra y
+el servidor **borraba la sala al instante** (pattern observado en el log del
+signaling: *"sala creada → participante unido → sala cerrada"*).
+
+Causa raíz: `handleClose()` en el servidor liberaba el slot final al cerrarse el
+socket, sin dejar margen para que el participante regresara. No había identidad
+persistente ni forma de reclamar el propio slot tras una recarga.
+
+### 13.2 Diagnóstico técnico
+
+- **Se cierra el WebSocket de signaling** (suspensión/recarga), el servidor
+  hace `handleClose()` y elimina la sala (y el estado de gameplay se reinicia).
+- El participante que vuelve **no tiene identidad propia**: cada carga generaba
+  ids efímeros, por lo que el servidor no podía saber qué slot era suyo.
+- No existía flujo de `resume`: el único camino era volver a `create`/`join`
+  con un **código de sala nuevo** (se perdía la conexión previa).
+
+### 13.3 Solución mínima implementada
+
+Un **streak de recuperación con identidad persistente**, sin Internet, sin
+TURN, sin autenticación y **sin modificar el flujo normal create/join** (el
+límite de 2 participantes se mantiene):
+
+1. **Identidad persistente del navegador** (`src/network/SessionPersistence.ts`:
+   `participantId` y `playerId` estables en `localStorage`, además del código de
+   la sala activa). Esto NO es autenticación: solo distingue "misma persona que
+   ocupaba el slot".
+
+2. **Ventana de gracia en el servidor** (`signaling/server.mjs`):
+   - Al cerrarse el WebSocket de un participante **sin `leave` explícito**, su
+     slot queda `recovering` con un `deadline` (`DEFAULT_GRACE_MS = 30_000`, un
+     *sweep* cada 2 s).
+   - Durante esa ventana, la identidad puede reclamar su slot (la sala no se
+     cierra; el otro participante sigue en ella).
+   - Si la gracia expira, el slot se libera y se envía `peer-left` al activo.
+
+3. **Mensajes nuevos en protocolo** (`src/network/protocol.ts`):
+   - Cliente→servidor: `resume {roomCode, participantId, role}`, `leave`.
+   - Servidor→cliente: `resumed {roomCode, peerActive}`,
+     `peer-resumed {roomCode}`.
+   - `create`/`join` ahora incluyen `participantId` (para poder reclamar el
+     slot; el servidor lo valida).
+
+4. **Flujo de recuperación** (`NetworkSession.resume()`):
+   - Al cargar, si hay sesión guardada se intenta `resume` automáticamente
+     antes de mostrar el menú de conexión.
+   - El host vuelve a su sala y **renegocia desde cero** (nueva
+     `RTCPeerConnection` + offer) en cuanto el servidor confirma `peerActive`.
+     Decisión: se usa renegociación fresca en lugar de `restartIce()`
+     (más determinista; `restartIce` queda como subfase posterior si hiciera
+     falta).
+   - El visitor vuelve y espera el offer del host (`peer-resumed` del lado
+     activo dispara la renegociación).
+   - `RtcPeerTransport` ya **no cierra al instante** en `disconnected`/`failed`
+     mientras la sesión está `open`: mantiene un *hold* de recuperación
+     (`RECOVERY_HOLD_MS = 35_000`) que da margen a que el peer vuelva.
+
+5. **Salida limpia**: `NetworkSession.close()` envía `leave` explícito para
+   liberar el slot (y cerrar la sala) **al instante**, sin esperar la gracia
+   (esto preserva el flujo normal "abandonar sala").
+
+### 13.4 Tests nuevos
+
+- `tests/helpers/signaling.ts`: servidor real en proceso (`port: 0`) + cliente
+  de test (`WsTestClient`) con espera por tipo de mensaje.
+- `tests/signalingServer.test.ts` (14): flujo normal create/join/signal;
+  sala llena; recuperación del host y del visitor; `peerActive=false` (ambos se
+  van); identidad ajena no puede reclamar el slot; rol incorrecto rechazado;
+  doble recuperación simultánea (solo la primera gana); expiración de la gracia
+  (+ `peer-left` al activo); el resume conserva el MISMÍSIMO código de sala;
+  `leave` explícito libera al instante; mensajes inválidos.
+- `tests/signalingClient.test.ts` (4): `createRoom`, `joinRoom` (+sala no
+  encontrada), `resume` con `peerActive`, `leave` libera la sala.
+- `tests/networkSession.test.ts` (7): `NetworkSession` contra signaling real
+  con transporte fake (sin WebRTC en Node): create/join, sala llena, recuperación
+  host/visitor, identidad ajena rechazada, `close()` envía `leave`.
+
+### 13.5 Comprobaciones
+
+- **`npm test`** → **51/51 PASS** (26 preexistentes + 25 nuevos; 11 suites).
+- **`npm run build`** → **OK** (tsc estricto + Vite). Solo el warning de tamaño
+  de chunk ya conocido (Phaser).
+- CLI del signaling verificado (arranca y responde con el nuevo protocolo).
+
+### 13.6 Limitaciones conocidas de M08-C
+
+- La renegociación WebRTC ocurre en el navegador y **no se puede validar en
+  Node**; necesita prueba manual en los dos dispositivos reales (suspender y
+  volver). Los tests cubren signaling y sesión, no el P2P del navegador.
+- Una sesión guardada **obsoleta** (abrir al día siguiente un código ya
+  expirado) mostrará un error al cargar; es el comportamiento previsto y se
+  limpiará la sesión guardada.
+- Si el **otro participante se quedó sin conexión 35 s**, el slot expira y el
+  caso cae al flujo normal (el que vuelve no reocupará su lugar).
+- Sigue **sin TURN** (fuera de alcance) y `restartIce()` no se usa (decision
+  documentada).
+- **Operativa**: el servidor de signaling que ya estaba corriendo (proceso
+  antiguo) debe **reiniciarse** para servir el nuevo protocolo.
+
+---

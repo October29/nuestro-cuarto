@@ -4,12 +4,19 @@ import { gameConfig } from './game/config';
 import { RoomScene } from './game/scenes/RoomScene';
 import { ConnectMenu } from './ui/connectMenu';
 import { ChatPanel } from './ui/chatPanel';
+import { loadSavedSession } from './network/SessionPersistence';
 import '../style.css';
 
 const game = new Phaser.Game(gameConfig);
 
 const chatPanel = new ChatPanel();
 const connectMenu = new ConnectMenu();
+
+// M08-C: si el navegador recargó la página con una sesión activa (p. ej. tras
+// una suspensión), se intenta recuperar automáticamente ese lugar en la sala.
+if (loadSavedSession()) {
+  void connectMenu.tryResume();
+}
 
 connectMenu.setMessageCallback((message) => {
   chatPanel.onRemoteMessage(message);

@@ -18,8 +18,14 @@ export interface TransportHandlers {
 }
 
 export interface NetworkTransport {
-  /** Negocia la conexión P2P y promete cuando el canal está abierto. */
-  connect(): Promise<void>;
+  /**
+   * Negocia la conexión P2P y promete cuando el canal está abierto.
+   * `initiate`: arranca la negociación de inmediato (solo host). Se usa en la
+   * recuperación M08-C: el signaling ya confirmó que el peer está presente, así
+   * que el host no necesita esperar un `peer-resumed` que ya llegó antes de
+   * suscribirse.
+   */
+  connect(options?: { initiate?: boolean }): Promise<void>;
   /** Envía un mensaje P2P. Devuelve false si el canal no está abierto. */
   send(message: PeerMessage): boolean;
   /** Cierra la conexión localmente. */
