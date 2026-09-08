@@ -19,8 +19,12 @@ import type { RoomState } from '../src/network/protocol';
 /** Simula el papel de RoomScene: conserva el RoomState recibido. */
 class FakeRoomScene {
   roomState: RoomState | null = null;
+  roomWidth: number = 800;
+  roomHeight: number = 600;
   setRoomState(state: RoomState): void {
     this.roomState = state;
+    this.roomWidth = state.width;
+    this.roomHeight = state.height;
   }
   getRoomState(): RoomState | null {
     return this.roomState;
@@ -30,7 +34,7 @@ class FakeRoomScene {
 class MockSession {
   public status: SessionState = 'idle';
   public readonly code = 'AB12CD';
-  private roomState: RoomState = { version: 1, name: 'Sala AB12CD' };
+  private roomState: RoomState = { version: 1, name: 'Sala AB12CD', width: 1200, height: 800 };
   private roomUpdatedListeners: Array<(state: RoomState) => void> = [];
 
   constructor(private readonly handlers: SessionHandlers) {}
@@ -109,15 +113,15 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
 
   it('una RoomScene simulada puede inicializarse con un RoomState válido', () => {
     const scene = new FakeRoomScene();
-    const state: RoomState = { version: 1, name: 'hello' };
+    const state: RoomState = { version: 1, name: 'hello', width: 1200, height: 800 };
     scene.setRoomState(state);
     assert.deepEqual(scene.getRoomState(), state);
   });
 
   it('la RoomScene simulada conserva el estado recibido', () => {
     const scene = new FakeRoomScene();
-    scene.setRoomState({ version: 1, name: 'first' });
-    scene.setRoomState({ version: 1, name: 'second' });
+    scene.setRoomState({ version: 1, name: 'first', width: 1200, height: 800 });
+    scene.setRoomState({ version: 1, name: 'second', width: 1200, height: 800 });
     assert.equal(scene.getRoomState()?.name, 'second');
   });
 
@@ -149,7 +153,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     assert.ok(session);
 
     // Simula que el servidor envía un estado con name específico
-    session.simulateServerUpdate({ version: 1, name: 'server-value' });
+    session.simulateServerUpdate({ version: 1, name: 'server-value', width: 1200, height: 800 });
 
     assert.equal(scene.getRoomState()?.name, 'server-value');
   });
@@ -173,7 +177,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     assert.equal(received.length, 1, 'debe haber recibido el estado inicial');
 
     // Simula una actualización del servidor
-    session.simulateServerUpdate({ version: 1, name: 'updated' });
+    session.simulateServerUpdate({ version: 1, name: 'updated', width: 1200, height: 800 });
 
     assert.equal(received.length, 2, 'debe haber recibido la actualización');
     assert.equal(received[1].name, 'updated');
@@ -190,10 +194,10 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     const session = getSession();
     assert.ok(session);
 
-    session.simulateServerUpdate({ version: 1, name: 'first-update' });
+    session.simulateServerUpdate({ version: 1, name: 'first-update', width: 1200, height: 800 });
     assert.equal(scene.getRoomState()?.name, 'first-update');
 
-    session.simulateServerUpdate({ version: 1, name: 'second-update' });
+    session.simulateServerUpdate({ version: 1, name: 'second-update', width: 1200, height: 800 });
     assert.equal(scene.getRoomState()?.name, 'second-update');
   });
 
@@ -223,7 +227,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
   it('la escena no escribe directamente en RoomState', () => {
     // Verificación: la escena solo lee el estado, no lo muta
     const scene = new FakeRoomScene();
-    const state: RoomState = { version: 1, name: 'original' };
+    const state: RoomState = { version: 1, name: 'original', width: 1200, height: 800 };
     scene.setRoomState(state);
 
     // La escena conserva la referencia; no la muta
@@ -245,7 +249,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     assert.ok(session);
 
     // Simula una actualización antes de desconectar
-    session.simulateServerUpdate({ version: 1, name: 'before-disconnect' });
+    session.simulateServerUpdate({ version: 1, name: 'before-disconnect', width: 1200, height: 800 });
     assert.equal(scene.getRoomState()?.name, 'before-disconnect');
 
     // Desconectar
@@ -267,5 +271,26 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
 
     assert.ok(scene.getRoomState(), 'el join también debe obtener el estado');
     assert.equal(scene.getRoomState()!.version, 1);
+  });
+
+  it('la escena consume width y height desde RoomState para su geometría', () => {
+    const scene = new FakeRoomScene();
+    const state: RoomState = { version: 1, name: 'test', width: 1200, height: 800 };
+    scene.setRoomState(state);
+
+    assert.equal(scene.roomWidth, 1200, 'roomWidth debe coincidir con state.width');
+    assert.equal(scene.roomHeight, 800, 'roomHeight debe coincidir con state.height');
+  });
+
+  it('la escena usa dimensiones de RoomState y no las globales de config', () => {
+    const scene = new FakeRoomScene();
+    // Valores iniciales diferentes a los defaults
+    assert.equal(scene.roomWidth, 800, 'roomWidth inicial es el default de Phaser (800)');
+    assert.equal(scene.roomHeight, 600, 'roomHeight inicial es el default de Phaser (600)');
+
+    // Al recibir RoomState, las dimensiones cambian a las del servidor
+    scene.setRoomState({ version: 1, name: 'test', width: 1200, height: 800 });
+    assert.equal(scene.roomWidth, 1200);
+    assert.equal(scene.roomHeight, 800);
   });
 });

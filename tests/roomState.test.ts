@@ -70,6 +70,19 @@ describe('Room State: el servidor mantiene y sirve el estado de la Room', () => 
     await session.close();
   });
 
+  test('una Room recién creada tiene width: 1200 y height: 800', async () => {
+    const s = await withServer();
+    const { session } = makeSession(s);
+
+    await session.createRoom();
+    const state = await session.getRoomState();
+
+    assert.equal(state.width, 1200, 'width debe ser 1200');
+    assert.equal(state.height, 800, 'height debe ser 800');
+
+    await session.close();
+  });
+
   test('un participante puede solicitar room:get-state y recibir room:state', async () => {
     const s = await withServer();
     const { session } = makeSession(s);
@@ -79,6 +92,21 @@ describe('Room State: el servidor mantiene y sirve el estado de la Room', () => 
 
     assert.ok(state, 'debe recibir un RoomState');
     assert.equal(typeof state, 'object', 'RoomState debe ser un objeto');
+
+    await session.close();
+  });
+
+  test('room:get-state devuelve las dimensiones de la Room', async () => {
+    const s = await withServer();
+    const { session } = makeSession(s);
+
+    await session.createRoom();
+    const state = await session.getRoomState();
+
+    assert.equal(typeof state.width, 'number', 'width debe ser un número');
+    assert.equal(typeof state.height, 'number', 'height debe ser un número');
+    assert.equal(state.width, 1200);
+    assert.equal(state.height, 800);
 
     await session.close();
   });
@@ -292,6 +320,40 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
 
     assert.equal(response.type, 'error');
     assert.equal(response.message, 'no puedes modificar version');
+
+    await client.close();
+  });
+
+  test('width no puede ser modificado por el cliente', async () => {
+    const s = await withServer();
+    const client = new WsTestClient(s.url);
+    await client.open();
+
+    client.send({ type: 'create' });
+    await client.next();
+
+    client.send({ type: 'room:update', patch: { name: 'ok', width: 999 } });
+    const response = (await client.next()) as { type: string; message?: string };
+
+    assert.equal(response.type, 'error');
+    assert.equal(response.message, 'no puedes modificar width');
+
+    await client.close();
+  });
+
+  test('height no puede ser modificado por el cliente', async () => {
+    const s = await withServer();
+    const client = new WsTestClient(s.url);
+    await client.open();
+
+    client.send({ type: 'create' });
+    await client.next();
+
+    client.send({ type: 'room:update', patch: { name: 'ok', height: 999 } });
+    const response = (await client.next()) as { type: string; message?: string };
+
+    assert.equal(response.type, 'error');
+    assert.equal(response.message, 'no puedes modificar height');
 
     await client.close();
   });

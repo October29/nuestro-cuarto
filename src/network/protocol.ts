@@ -99,6 +99,10 @@ export interface RoomState {
    * - Persiste mientras la Room viva en el servidor.
    */
   name: string;
+  /** Ancho de la sala en píxeles. Dimensión autoritativa del servidor. */
+  width: number;
+  /** Alto de la sala en píxeles. Dimensión autoritativa del servidor. */
+  height: number;
 }
 
 /** Propiedades de RoomState que el cliente puede modificar vía room:update. */

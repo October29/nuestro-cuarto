@@ -56,7 +56,7 @@ export function createSignalingServer(options = {}) {
 
   /** Estado inicial de una Room recién creada. */
   function createInitialState(roomCode) {
-    return { version: 1, name: `Sala ${roomCode}` };
+    return { version: 1, name: `Sala ${roomCode}`, width: 1200, height: 800 };
   }
 
   function send(socket, data) {
@@ -194,6 +194,14 @@ export function createSignalingServer(options = {}) {
           // Solo aceptamos name como propiedad modificable.
           if ('version' in patch) {
             send(socket, { type: 'error', message: 'no puedes modificar version' });
+            return;
+          }
+          if ('width' in patch) {
+            send(socket, { type: 'error', message: 'no puedes modificar width' });
+            return;
+          }
+          if ('height' in patch) {
+            send(socket, { type: 'error', message: 'no puedes modificar height' });
             return;
           }
           const allowedKeys = new Set(['name']);

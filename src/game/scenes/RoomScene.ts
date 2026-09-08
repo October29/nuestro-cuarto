@@ -28,45 +28,74 @@ export class RoomScene extends Phaser.Scene {
   private activeSession: NetworkSession | null = null;
   private roomState: RoomState | null = null;
 
+  private roomWidth = ROOM_WIDTH;
+  private roomHeight = ROOM_HEIGHT;
+  private roomContainer: Phaser.GameObjects.Container | null = null;
+  private sofa: Sofa | null = null;
+  private collisionSystem: CollisionSystem | null = null;
+
   constructor() {
     super('room');
   }
 
   create(): void {
-    const floorY = 420;
-
-    this.add.rectangle(0, 0, ROOM_WIDTH, floorY, 0x182238).setOrigin(0, 0);
-    this.add.rectangle(0, floorY, ROOM_WIDTH, ROOM_HEIGHT - floorY, 0x3c292c).setOrigin(0, 0);
-
-    this.windowAt(120, 80);
-    this.add.ellipse(ROOM_WIDTH / 2, ROOM_HEIGHT - 60, 640, 190, 0x714c4c);
-
-    this.add
-      .text(ROOM_WIDTH / 2, ROOM_HEIGHT - 26, 'Nuestro cuartito 🌙', {
-        fontSize: '22px',
-        color: '#d8deff',
-      })
-      .setOrigin(0.5);
-
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as WasdKeys;
 
-    // Phaser captura WASD/flechas a nivel de ventana y llama preventDefault a
-    // cualquier tecla capturada sin mirar el foco del DOM (esto impedía
-    // escribir con W/A/S/D en el chat). Al limpiar las capturas se deja de
-    // interferir con los inputs del navegador; Key.isDown sigue funcionando.
     this.input.keyboard!.clearCaptures();
 
-    const collisionSystem = new CollisionSystem();
+    if (this.roomState) {
+      this.roomWidth = this.roomState.width;
+      this.roomHeight = this.roomState.height;
+    }
 
-    this.player = new Player(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 110, collisionSystem);
+    this.buildRoom();
+
+    if (this.pendingSession) {
+      this.startSync(this.pendingSession);
+      this.pendingSession = null;
+    }
+  }
+
+  private buildRoom(): void {
+    this.roomContainer?.destroy();
+
+    this.collisionSystem = new CollisionSystem();
+
+    this.roomContainer = this.add.container(0, 0);
+
+    const floorY = 420;
+
+    this.roomContainer.add(
+      this.add.rectangle(0, 0, this.roomWidth, floorY, 0x182238).setOrigin(0, 0),
+    );
+    this.roomContainer.add(
+      this.add.rectangle(0, floorY, this.roomWidth, this.roomHeight - floorY, 0x3c292c).setOrigin(0, 0),
+    );
+
+    this.roomContainer.add(this.buildWindow(120, 80));
+
+    this.roomContainer.add(
+      this.add.ellipse(this.roomWidth / 2, this.roomHeight - 60, 640, 190, 0x714c4c),
+    );
+
+    this.roomContainer.add(
+      this.add
+        .text(this.roomWidth / 2, this.roomHeight - 26, 'Nuestro cuartito 🌙', {
+          fontSize: '22px',
+          color: '#d8deff',
+        })
+        .setOrigin(0.5),
+    );
+
+    this.player = new Player(this, this.roomWidth / 2, this.roomHeight - 110, this.collisionSystem);
     this.player.setDepth(1);
 
-    const sofa = new Sofa(this, ROOM_WIDTH / 2, ROOM_HEIGHT - 230);
-    collisionSystem.addObstacle(sofa);
+    this.sofa = new Sofa(this, this.roomWidth / 2, this.roomHeight - 230);
+    this.collisionSystem.addObstacle(this.sofa);
 
     this.interactionSystem = new InteractionSystem(this, this.player, Phaser);
-    this.interactionSystem.addInteractable(sofa);
+    this.interactionSystem.addInteractable(this.sofa);
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.interactionSystem.tryInteractFromPointer(pointer)) return;
@@ -75,13 +104,27 @@ export class RoomScene extends Phaser.Scene {
       this.player.moveToPoint(world.x, world.y);
     });
 
-    this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
+    this.cameras.main.setBounds(0, 0, this.roomWidth, this.roomHeight);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+  }
 
-    if (this.pendingSession) {
-      this.startSync(this.pendingSession);
-      this.pendingSession = null;
-    }
+  private buildWindow(x: number, y: number): Phaser.GameObjects.GameObject[] {
+    const windowWidth = 210;
+    const windowHeight = 170;
+
+    const top = y - windowHeight / 2;
+    const bottom = y + windowHeight / 2;
+
+    return [
+      this.add.rectangle(x, y, windowWidth, windowHeight, 0x10182d).setStrokeStyle(12, 0x674d4d),
+      this.add.text(x, top + 20, '🌙', { fontSize: '46px' }).setOrigin(0.5, 0),
+      this.add
+        .text(x, bottom - 26, '✦  ·  ✧  ·  ✦', {
+          fontSize: '16px',
+          color: '#ffe9d6',
+        })
+        .setOrigin(0.5),
+    ];
   }
 
   update(_time: number, delta: number): void {
@@ -128,6 +171,14 @@ export class RoomScene extends Phaser.Scene {
   /** Recibe y conserva el RoomState del servidor. RoomScene NO es dueña del estado. */
   setRoomState(state: RoomState): void {
     this.roomState = state;
+
+    if (this.roomWidth !== state.width || this.roomHeight !== state.height) {
+      this.roomWidth = state.width;
+      this.roomHeight = state.height;
+      if (this.scene.isActive()) {
+        this.buildRoom();
+      }
+    }
   }
 
   /** Devuelve el último RoomState recibido (null si no se ha conectado). */
@@ -145,8 +196,6 @@ export class RoomScene extends Phaser.Scene {
   }
 
   private getPlayerInput(): PlayerInput {
-    // Mientras se escribe en un campo editable (chat, código de sala) el
-    // teclado es del input; el jugador no debe moverse.
     if (isEditableFocused()) {
       return { up: false, down: false, left: false, right: false };
     }
@@ -159,24 +208,5 @@ export class RoomScene extends Phaser.Scene {
       left: left.isDown || this.wasd.A.isDown,
       right: right.isDown || this.wasd.D.isDown,
     };
-  }
-
-  private windowAt(x: number, y: number): void {
-    const windowWidth = 210;
-    const windowHeight = 170;
-
-    this.add.rectangle(x, y, windowWidth, windowHeight, 0x10182d).setStrokeStyle(12, 0x674d4d);
-
-    const top = y - windowHeight / 2;
-    const bottom = y + windowHeight / 2;
-
-    this.add.text(x, top + 20, '🌙', { fontSize: '46px' }).setOrigin(0.5, 0);
-
-    this.add
-      .text(x, bottom - 26, '✦  ·  ✧  ·  ✦', {
-        fontSize: '16px',
-        color: '#ffe9d6',
-      })
-      .setOrigin(0.5);
   }
 }
