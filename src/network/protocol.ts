@@ -33,7 +33,8 @@ export type ClientSignalingMessage =
   | SignalingJoinMessage
   | SignalingRelayMessage
   | SignalingLeaveMessage
-  | SignalingRoomGetStateMessage;
+  | SignalingRoomGetStateMessage
+  | SignalingRoomUpdateMessage;
 
 // --- Signaling: servidor → cliente ---
 
@@ -72,7 +73,8 @@ export type ServerSignalingMessage =
   | SignalingRelayedMessage
   | SignalingPeerLeftMessage
   | SignalingErrorMessage
-  | SignalingRoomStateMessage;
+  | SignalingRoomStateMessage
+  | SignalingRoomUpdatedMessage;
 
 // --- Room State ---
 
@@ -80,7 +82,12 @@ export type ServerSignalingMessage =
 export interface RoomState {
   /** Versión del contrato de RoomState. Incremental, no implica migración automática. */
   version: 1;
+  /** Campo experimental para validar el mecanismo de escritura. Será reemplazado. */
+  testValue: string;
 }
+
+/** Propiedades de RoomState que el cliente puede modificar vía room:update. */
+export type RoomStatePatch = Pick<RoomState, 'testValue'>;
 
 // --- Mensajes de Room State: cliente → servidor ---
 
@@ -88,10 +95,20 @@ export interface SignalingRoomGetStateMessage {
   type: 'room:get-state';
 }
 
+export interface SignalingRoomUpdateMessage {
+  type: 'room:update';
+  patch: RoomStatePatch;
+}
+
 // --- Mensajes de Room State: servidor → cliente ---
 
 export interface SignalingRoomStateMessage {
   type: 'room:state';
+  state: RoomState;
+}
+
+export interface SignalingRoomUpdatedMessage {
+  type: 'room:updated';
   state: RoomState;
 }
 

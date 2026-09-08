@@ -1,6 +1,6 @@
 import { SignalingClient } from './SignalingClient';
 import { RtcPeerTransport } from './RtcPeerTransport';
-import type { PeerMessage, RoomState } from './protocol';
+import type { PeerMessage, RoomState, RoomStatePatch } from './protocol';
 import type { NetworkTransport, TransportHandlers } from './NetworkTransport';
 
 export type SessionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -19,6 +19,8 @@ export interface SessionHandlers {
   /** El signaling confirmó la sala (created/joined): el código ya es válido
    * y puede mostrarse, aunque el canal P2P todavía no esté abierto. */
   onRoomCreated?(roomCode: string): void;
+  /** El servidor notificó una actualización del RoomState (room:updated). */
+  onRoomUpdated?(state: RoomState): void;
 }
 
 export interface NetworkSessionOptions {
@@ -79,6 +81,8 @@ export class NetworkSession {
         this.handlers.onPeerJoined?.();
       } else if (message.type === 'peer-left') {
         this.peerPresent = false;
+      } else if (message.type === 'room:updated') {
+        this.handlers.onRoomUpdated?.(message.state);
       }
     });
 
@@ -159,6 +163,20 @@ export class NetworkSession {
    */
   getRoomState(): Promise<RoomState> {
     return this.signaling.getRoomState();
+  }
+
+  /**
+   * Actualiza el estado de la Room (Room State Step 2).
+   *
+   * Envía un patch al servidor, que valida los campos permitidos,
+   * aplica el cambio y notifica a todos los participantes con room:updated.
+   * Devuelve el RoomState actualizado tras la notificación del servidor.
+   */
+  updateRoomState(patch: RoomStatePatch): Promise<RoomState> {
+    return this.signaling.updateRoomState(patch).then((state) => {
+      this.handlers.onRoomUpdated?.(state);
+      return state;
+    });
   }
 
   /** Cierre local de la sesión (no notifica onPeerLeft: lo hace el usuario). */

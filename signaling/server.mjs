@@ -56,7 +56,7 @@ export function createSignalingServer(options = {}) {
 
   /** Estado inicial de una Room recién creada. */
   function createInitialState() {
-    return { version: 1 };
+    return { version: 1, testValue: '' };
   }
 
   function send(socket, data) {
@@ -72,6 +72,13 @@ export function createSignalingServer(options = {}) {
 
   function otherPresentPeer(room, socket) {
     return room.sockets.find((s) => s !== socket && s.readyState === WebSocket.OPEN);
+  }
+
+  /** Envía un mensaje a todos los sockets presentes en una Room. */
+  function broadcastToRoom(room, message) {
+    for (const s of room.sockets) {
+      if (s.readyState === WebSocket.OPEN) send(s, message);
+    }
   }
 
   function addPresence(code, socket) {
@@ -169,6 +176,40 @@ export function createSignalingServer(options = {}) {
             return;
           }
           send(socket, { type: 'room:state', state: room.state });
+          break;
+        }
+
+        case 'room:update': {
+          const room = roomBySocket(socket);
+          if (!room) {
+            send(socket, { type: 'error', message: 'no estás en ninguna sala' });
+            return;
+          }
+          if (!msg.patch || typeof msg.patch !== 'object') {
+            send(socket, { type: 'error', message: 'patch inválido' });
+            return;
+          }
+          const patch = msg.patch;
+          // Solo se permite modificar propiedades explícitamente permitidas.
+          // Solo aceptamos testValue como propiedad modificable.
+          if ('version' in patch) {
+            send(socket, { type: 'error', message: 'no puedes modificar version' });
+            return;
+          }
+          const allowedKeys = new Set(['testValue']);
+          for (const key of Object.keys(patch)) {
+            if (!allowedKeys.has(key)) {
+              send(socket, { type: 'error', message: `propiedad no permitida: ${key}` });
+              return;
+            }
+          }
+          if (typeof patch.testValue !== 'string') {
+            send(socket, { type: 'error', message: 'testValue debe ser un string' });
+            return;
+          }
+          room.state = { ...room.state, testValue: patch.testValue };
+          broadcastToRoom(room, { type: 'room:updated', state: room.state });
+          console.log(`room:update aceptado en ${room.code}`);
           break;
         }
 

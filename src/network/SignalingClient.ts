@@ -4,6 +4,7 @@ import type {
   SignalPayload,
   SignalingErrorMessage,
   RoomState,
+  RoomStatePatch,
 } from './protocol';
 
 const DEFAULT_PORT = 8787;
@@ -110,6 +111,17 @@ export class SignalingClient {
   }
 
   /**
+   * Envía una actualización del estado de la Room al servidor.
+   * El servidor valida el patch, aplica los cambios permitidos y
+   *Notifica a todos los participantes con room:updated.
+   */
+  updateRoomState(patch: RoomStatePatch): Promise<RoomState> {
+    return this.exchange({ type: 'room:update', patch }, 'room:updated', 'updateRoomState').then(
+      (message) => (message as { type: 'room:updated'; state: RoomState }).state,
+    );
+  }
+
+  /**
    * Anuncia el abandono de la sala en la que esta conexión está presente.
    *
    * Concepto opuesto a close():
@@ -180,6 +192,7 @@ export class SignalingClient {
       'peer-left',
       'error',
       'room:state',
+      'room:updated',
     ];
     const serverMsg = msg as ServerSignalingMessage;
     if (!knownTypes.includes(serverMsg.type)) return;
