@@ -3,6 +3,7 @@ import type {
   ServerSignalingMessage,
   SignalPayload,
   SignalingErrorMessage,
+  RoomState,
 } from './protocol';
 
 const DEFAULT_PORT = 8787;
@@ -98,6 +99,17 @@ export class SignalingClient {
   }
 
   /**
+   * Solicita el estado actual de la Room a la que esta conexión pertenece.
+   * Devuelve el RoomState si el servidor responde; lanza si no se está en
+   * ninguna sala o si la conexión no está activa.
+   */
+  getRoomState(): Promise<RoomState> {
+    return this.exchange({ type: 'room:get-state' }, 'room:state', 'getRoomState').then(
+      (message) => (message as { type: 'room:state'; state: RoomState }).state,
+    );
+  }
+
+  /**
    * Anuncia el abandono de la sala en la que esta conexión está presente.
    *
    * Concepto opuesto a close():
@@ -167,6 +179,7 @@ export class SignalingClient {
       'signal',
       'peer-left',
       'error',
+      'room:state',
     ];
     const serverMsg = msg as ServerSignalingMessage;
     if (!knownTypes.includes(serverMsg.type)) return;

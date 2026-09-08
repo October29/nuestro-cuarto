@@ -54,6 +54,11 @@ export function createSignalingServer(options = {}) {
     return code;
   }
 
+  /** Estado inicial de una Room recién creada. */
+  function createInitialState() {
+    return { version: 1 };
+  }
+
   function send(socket, data) {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(data));
@@ -110,7 +115,7 @@ export function createSignalingServer(options = {}) {
         case 'create': {
           if (socket.roomCode) return;
           const roomCode = generateCode(new Set(rooms.keys()));
-          rooms.set(roomCode, { code: roomCode, createdAt: Date.now(), sockets: [] });
+          rooms.set(roomCode, { code: roomCode, createdAt: Date.now(), sockets: [], state: createInitialState() });
           addPresence(roomCode, socket);
           send(socket, { type: 'created', roomCode });
           console.log(`sala creada: ${roomCode}`);
@@ -154,6 +159,16 @@ export function createSignalingServer(options = {}) {
           if (peer) {
             send(peer, { type: 'signal', data: msg.data });
           }
+          break;
+        }
+
+        case 'room:get-state': {
+          const room = roomBySocket(socket);
+          if (!room) {
+            send(socket, { type: 'error', message: 'no estás en ninguna sala' });
+            return;
+          }
+          send(socket, { type: 'room:state', state: room.state });
           break;
         }
 

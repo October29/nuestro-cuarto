@@ -32,7 +32,8 @@ export type ClientSignalingMessage =
   | SignalingCreateMessage
   | SignalingJoinMessage
   | SignalingRelayMessage
-  | SignalingLeaveMessage;
+  | SignalingLeaveMessage
+  | SignalingRoomGetStateMessage;
 
 // --- Signaling: servidor → cliente ---
 
@@ -70,7 +71,29 @@ export type ServerSignalingMessage =
   | SignalingPeerJoinedMessage
   | SignalingRelayedMessage
   | SignalingPeerLeftMessage
-  | SignalingErrorMessage;
+  | SignalingErrorMessage
+  | SignalingRoomStateMessage;
+
+// --- Room State ---
+
+/** Estado persistente de una Room. Vive en el servidor y se consulta vía signaling. */
+export interface RoomState {
+  /** Versión del contrato de RoomState. Incremental, no implica migración automática. */
+  version: 1;
+}
+
+// --- Mensajes de Room State: cliente → servidor ---
+
+export interface SignalingRoomGetStateMessage {
+  type: 'room:get-state';
+}
+
+// --- Mensajes de Room State: servidor → cliente ---
+
+export interface SignalingRoomStateMessage {
+  type: 'room:state';
+  state: RoomState;
+}
 
 // --- Payload de signaling (SDP offer/answer e ICE candidate) ---
 

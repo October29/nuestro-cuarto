@@ -1,6 +1,6 @@
 import { SignalingClient } from './SignalingClient';
 import { RtcPeerTransport } from './RtcPeerTransport';
-import type { PeerMessage } from './protocol';
+import type { PeerMessage, RoomState } from './protocol';
 import type { NetworkTransport, TransportHandlers } from './NetworkTransport';
 
 export type SessionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -146,6 +146,19 @@ export class NetworkSession {
   send(message: PeerMessage): boolean {
     if (this.status !== 'connected' || !this.transport) return false;
     return this.transport.send(message);
+  }
+
+  /**
+   * Solicita el estado actual de la Room al servidor (Room State Step 1).
+   *
+   * La sesión debe estar en estado 'connected' (es decir, haber completado
+   * createRoom o joinRoom). El servidor validará que el socket pertenece a
+   * una Room antes de responder.
+   *
+   * Esta operación es de solo lectura: no modifica el estado de la sala.
+   */
+  getRoomState(): Promise<RoomState> {
+    return this.signaling.getRoomState();
   }
 
   /** Cierre local de la sesión (no notifica onPeerLeft: lo hace el usuario). */
