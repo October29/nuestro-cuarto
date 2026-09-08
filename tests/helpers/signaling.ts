@@ -11,8 +11,19 @@ export interface TestSignalingServer {
 }
 
 export async function startTestSignaling(): Promise<TestSignalingServer> {
-  const port = 9800 + Math.floor(Math.random() * 500);
-  const server = createSignalingServer({ port });
+  // Puerto 0: el SO asigna un puerto libre, evitando colisiones entre los
+  // múltiples servidores que arrancan en paralelo (los tests se ejecutan
+  // concurrentemente). El puerto real se lee una vez que escucha.
+  const server = createSignalingServer({ port: 0 });
+  const port = await new Promise<number>((resolve, reject) => {
+    server.wss.on('listening', () => {
+      const address = server.wss.address();
+      const p = typeof address === 'object' && address ? address.port : 0;
+      if (p) resolve(p);
+      else reject(new Error('no se pudo determinar el puerto del signaling de test'));
+    });
+    server.wss.on('error', reject);
+  });
   return {
     url: `ws://127.0.0.1:${port}`,
     async close() {

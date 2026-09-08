@@ -17,29 +17,31 @@ export type TransportState = 'idle' | 'connecting' | 'open' | 'closed';
  * Implementación de NetworkTransport sobre las APIs WebRTC nativas del
  * navegador: RTCPeerConnection + RTCDataChannel. No usa librerías externas.
  *
- * El rol host/visitor es únicamente de establecimiento de conexión: el host
- * crea el `offer` y el canal; el visitor responde. Nada más. No implica
- * autoridad sobre el estado del juego (cada cliente es autoridad de su
- * propio Player).
+ * El ciclo de vida del transporte es independiente del ciclo de vida de la
+ * Room. `connect()` arma el transporte y resuelve de inmediato; la
+ * negociación P2P empieza cuando un peer se une (peer-joined del signaling)
+ * o cuando llega un offer entrante. Si el peer se va, se cierra la conexión
+ * P2P actual (resetNegotiation) pero el transporte permanece armado y listo
+ * para re-negociar con el siguiente participante.
  *
- * RTCPeerConnection y RTCDataChannel quedan completamente ocultos detrás de
- * NetworkTransport: el resto de la aplicación solo usa esta clase.
+ * El parámetro `role` se mantiene por compatibilidad pero NO determina quién
+ * inicia la negociación: lo hace quien ya está presente en la sala cuando
+ * llega el otro (offerer) y el que acaba de llegar responde (answerer).
  */
 export class RtcPeerTransport implements NetworkTransport {
   private connection: RTCPeerConnection | null = null;
   private channel: RTCDataChannel | null = null;
   private unsubscribeSignaling: (() => void) | null = null;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  private openResolve: (() => void) | null = null;
-  private openReject: ((error: Error) => void) | null = null;
   private status: TransportState = 'idle';
-  private closeNotified = false;
-  private negotiationStarted = false;
+  private negotiating = false;
 
   constructor(
     private readonly signaling: SignalingClient,
     private readonly handlers: TransportHandlers,
-    private readonly role: 'host' | 'visitor',
+    // Legacy: se conserva por compatibilidad de firma, pero ya no se usa.
+    // La negociación la inicia quien está presente, no el rol.
+    _role: 'host' | 'visitor',
     private readonly iceServers: RTCIceServer[] = DEFAULT_ICE_SERVERS,
   ) {}
 
@@ -47,84 +49,25 @@ export class RtcPeerTransport implements NetworkTransport {
     return this.status;
   }
 
-  /** Negocia la conexión P2P y promete cuando el canal de datos está abierto. */
+  /**
+   * Arma el transporte y se suscribe a señales del servidor. Resuelve de
+   * inmediato: la negociación P2P empieza cuando haya un peer disponible.
+   */
   connect(): Promise<void> {
     if (this.status === 'open') return Promise.resolve();
-    if (this.status !== 'idle') return Promise.reject(new Error('transporte: no se puede conectar en este estado'));
+    if (this.status !== 'idle')
+      return Promise.reject(new Error('transporte: no se puede conectar en este estado'));
 
     this.status = 'connecting';
     this.unsubscribeSignaling = this.signaling.subscribe((message) => {
       if (message.type === 'signal') {
-        this.handleIncomingSignal(message.data);
-      } else if (message.type === 'peer-joined' && this.role === 'host') {
-        // El host creó la sala y ahora el visitor está presente: solo entonces
-        // arranca la negociación (corrección M07-A). Si el visitor ya estuviera
-        // conectado antes, el offer nunca se perdería porque no se envía antes.
-        this.startHostNegotiation();
+        void this.handleIncomingSignal(message.data);
+      } else if (message.type === 'peer-joined') {
+        this.onPeerJoined();
       }
     });
 
-    return new Promise<void>((resolve, reject) => {
-      this.openResolve = resolve;
-      this.openReject = reject;
-
-      this.connection = new RTCPeerConnection({ iceServers: this.iceServers });
-      this.connection.onicecandidate = (event) => {
-        if (event.candidate) {
-          this.signaling.sendSignal({
-            kind: 'ice',
-            candidate: event.candidate.candidate,
-            sdpMid: event.candidate.sdpMid ?? undefined,
-            sdpMLineIndex: event.candidate.sdpMLineIndex ?? undefined,
-          });
-        }
-      };
-      this.connection.onconnectionstatechange = () => {
-        const state = this.connection?.connectionState;
-        if (state === 'failed') {
-          this.notifyClose('fallo de negociación (connectionState failed)');
-        } else if (state === 'disconnected') {
-          this.notifyClose('la conexión con el peer se ha perdido');
-        }
-      };
-
-      if (this.role === 'visitor') {
-        this.connection.ondatachannel = (event) => {
-          this.channel = event.channel;
-          this.setupChannel(event.channel);
-        };
-      }
-    });
-  }
-
-  /**
-   * Inicia la negociación desde el lado host al recibir `peer-joined`.
-   * Protegido contra `peer-joined` duplicados: solo se negocia una vez.
-   */
-  private startHostNegotiation(): void {
-    if (this.role !== 'host' || this.negotiationStarted || this.status !== 'connecting') return;
-    if (!this.connection) return;
-
-    this.negotiationStarted = true;
-    this.startNegotiationTimeout();
-
-    console.log(
-      `[M07A-DIAG] [${new Date().toISOString()}] [RtcPeerTransport startHostNegotiation] role=host`,
-    );
-
-    this.channel = this.connection.createDataChannel(CHANNEL_LABEL);
-    this.setupChannel(this.channel);
-    void this.makeOffer();
-  }
-
-  /**
-   * El timeout de negociación arranca cuando la negociación empieza de verdad
-   * (el host al recibir peer-joined; el visitor al recibir el offer), no
-   * mientras el host espera a que alguien se una a la sala.
-   */
-  private startNegotiationTimeout(): void {
-    if (this.timeoutTimer) return;
-    this.timeoutTimer = setTimeout(() => this.fail('negociación agotada (timeout)'), NEGOTIATION_TIMEOUT_MS);
+    return Promise.resolve();
   }
 
   send(message: PeerMessage): boolean {
@@ -134,16 +77,64 @@ export class RtcPeerTransport implements NetworkTransport {
     return true;
   }
 
-  /** Cierre local de la conexión (no emite onClose: lo hizo el usuario). */
+  /** Cierre local: desarma el transporte y limpia todo. */
   close(): void {
     this.status = 'closed';
-    this.closeNotified = true;
     if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
     this.timeoutTimer = null;
-    this.openReject?.(new Error('conexión cerrada localmente'));
-    this.openReject = null;
-    this.openResolve = null;
-    this.cleanup();
+    this.negotiating = false;
+    this.channel = null;
+    this.closeConnection();
+    this.unsubscribeSignaling?.();
+    this.unsubscribeSignaling = null;
+  }
+
+  // ── Negotiation ──────────────────────────────────────────────────
+
+  /** Un peer se unió: si estoy armado y no estoy negociando, arranco. */
+  private onPeerJoined(): void {
+    if (this.negotiating || this.status !== 'connecting') return;
+
+    this.ensureConnection();
+    this.negotiating = true;
+    this.startNegotiationTimeout();
+
+    this.channel = this.connection!.createDataChannel(CHANNEL_LABEL);
+    this.setupChannel(this.channel);
+    void this.makeOffer();
+  }
+
+  /** Crea el RTCPeerConnection si no existe (lazy). */
+  private ensureConnection(): void {
+    if (this.connection) return;
+    this.connection = new RTCPeerConnection({ iceServers: this.iceServers });
+    this.connection.onicecandidate = (event) => {
+      if (event.candidate) {
+        this.signaling.sendSignal({
+          kind: 'ice',
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid ?? undefined,
+          sdpMLineIndex: event.candidate.sdpMLineIndex ?? undefined,
+        });
+      }
+    };
+    this.connection.onconnectionstatechange = () => {
+      const state = this.connection?.connectionState;
+      if (state === 'failed') {
+        this.notifyClose('fallo de negociación (connectionState failed)');
+      } else if (state === 'disconnected') {
+        this.notifyClose('la conexión con el peer se ha perdido');
+      }
+    };
+    this.connection.ondatachannel = (event) => {
+      this.channel = event.channel;
+      this.setupChannel(event.channel);
+    };
+  }
+
+  private startNegotiationTimeout(): void {
+    if (this.timeoutTimer) return;
+    this.timeoutTimer = setTimeout(() => this.fail('negociación agotada (timeout)'), NEGOTIATION_TIMEOUT_MS);
   }
 
   private async makeOffer(): Promise<void> {
@@ -159,27 +150,29 @@ export class RtcPeerTransport implements NetworkTransport {
   }
 
   private async handleIncomingSignal(data: SignalPayload): Promise<void> {
-    const pc = this.connection;
-    if (!pc) return;
+    if (this.status === 'closed') return;
 
     try {
       switch (data.kind) {
         case 'offer': {
-          if (this.role !== 'visitor') break;
-          // La negociación empieza aquí para el visitor: arranca su timeout.
+          this.ensureConnection();
+          this.negotiating = true;
           this.startNegotiationTimeout();
-          await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
+          await this.connection!.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+          const answer = await this.connection!.createAnswer();
+          await this.connection!.setLocalDescription(answer);
           this.signaling.sendSignal({ kind: 'answer', sdp: answer.sdp ?? '' });
           break;
         }
         case 'answer': {
-          if (this.role !== 'host' || pc.signalingState !== 'have-local-offer') break;
+          const pc = this.connection;
+          if (!pc || pc.signalingState !== 'have-local-offer') break;
           await pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
           break;
         }
         case 'ice': {
+          const pc = this.connection;
+          if (!pc) break;
           await pc
             .addIceCandidate(
               new RTCIceCandidate({
@@ -200,14 +193,9 @@ export class RtcPeerTransport implements NetworkTransport {
   private setupChannel(channel: RTCDataChannel): void {
     channel.onopen = () => {
       this.status = 'open';
-      console.log(
-        `[M07A-DIAG] [${new Date().toISOString()}] [RtcPeerTransport onOpen] role=${this.role} label=${channel.label}`,
-      );
       if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
-      this.openResolve?.();
-      this.openResolve = null;
-      this.openReject = null;
+      this.negotiating = false;
       this.handlers.onOpen();
     };
     channel.onmessage = (event) => {
@@ -222,40 +210,33 @@ export class RtcPeerTransport implements NetworkTransport {
     };
   }
 
-  /** Cierre detectado (el peer desapareció o la conexión falló). */
+  // ── Close / Reset ────────────────────────────────────────────────
+
+  /** Peer se fue o conexión falló: cierra PC actual, mantiene transporte armado. */
   private notifyClose(reason: string): void {
-    if (this.closeNotified) return;
-    this.closeNotified = true;
-
-    if (this.status === 'connecting') {
-      this.fail(reason);
-      return;
-    }
     if (this.status !== 'open') return;
-
-    this.status = 'closed';
-    this.cleanup();
+    this.status = 'connecting';
+    this.resetNegotiation();
     this.handlers.onClose(reason);
   }
 
-  /** Falla durante la negociación: rechaza connect() y avisa por onError. */
+  /** Negociación falló: resetea pero no cierra el transporte. */
   private fail(reason: string): void {
-    if (this.status !== 'connecting') return;
-    this.closeNotified = true;
-    this.status = 'closed';
-    if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
-    this.timeoutTimer = null;
-    this.openReject?.(new Error(reason));
-    this.openReject = null;
-    this.openResolve = null;
-    this.cleanup();
+    if (this.status === 'closed') return;
+    this.resetNegotiation();
     this.handlers.onError(reason);
   }
 
-  private cleanup(): void {
-    this.unsubscribeSignaling?.();
-    this.unsubscribeSignaling = null;
+  /** Cierra PC y canal, resetea flags de negociación. No toca signaling ni status. */
+  private resetNegotiation(): void {
+    if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
+    this.timeoutTimer = null;
     this.channel = null;
+    this.negotiating = false;
+    this.closeConnection();
+  }
+
+  private closeConnection(): void {
     if (this.connection) {
       try {
         this.connection.close();

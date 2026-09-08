@@ -98,6 +98,7 @@ export class ConnectMenu {
 
   private async handleCreate(): Promise<void> {
     this.resetError();
+    this.disposeActiveSession();
     this.setUIState('connecting');
 
     const name = this.newRoomNameInput.value.trim();
@@ -126,6 +127,7 @@ export class ConnectMenu {
 
   private async handleJoin(): Promise<void> {
     this.resetError();
+    this.disposeActiveSession();
     this.creatingRoom = false;
     this.pendingName = null;
     const code = this.codeInput.value.trim().toUpperCase();
@@ -156,6 +158,7 @@ export class ConnectMenu {
   /** Entra en una sala desde "Mis salas": joinRoom(roomId), sin resume. */
   private async enterSavedRoom(roomId: string): Promise<void> {
     this.resetError();
+    this.disposeActiveSession();
     this.creatingRoom = false;
     this.pendingName = null;
     this.codeInput.value = roomId;
@@ -230,6 +233,23 @@ export class ConnectMenu {
     this.notifySessionChanged();
   }
 
+  /**
+   * Antes de crear/unir/entrar en una Room nueva, abandona limpiamente la
+   * sesión activa si la hubiera (leave: anuncia al signaling y cierra su
+   * transporte). Evita dejar dos sesiones vivas encima de la misma UI.
+   * Guard por si la sesión (p.ej. un mock de test) no expone leave().
+   */
+  private disposeActiveSession(): void {
+    const session = this.session;
+    if (!session) return;
+    if (typeof (session as { leave?: () => void }).leave === 'function') {
+      session.leave();
+    } else {
+      session.close();
+    }
+    this.session = null;
+  }
+
   private buildHandlers(): SessionHandlers {
     return {
       onOpen: () => {
@@ -238,14 +258,10 @@ export class ConnectMenu {
         // de createRoom/joinRoom. Aquí solo actualizamos el estado visual de la UI.
       },
       onMessage: (message) => this.onMessage?.(message),
-      onPeerLeft: (reason) => {
-        this.session = null;
-        this.codeDisplay.hidden = true;
-        this.codeInput.disabled = false;
-        this.codeInput.value = '';
-        this.setUIState('idle');
-        this.notifySessionChanged();
-        this.showError(`Peer desconectado: ${reason}`);
+      onPeerLeft: () => {
+        // El peer se fue, pero la Room sigue viva y esta sesión permanece en
+        // ella: no dejamos la sala ni desmontamos la sesión. El estado visual
+        // de la UI sigue siendo 'conectado'.
       },
       onError: (error) => {
         this.showError(error.message);

@@ -6,9 +6,9 @@ import type { NetworkTransport, TransportHandlers } from './NetworkTransport';
 export type SessionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
 /**
- * Rol en la habitación conjunta. Sirve solo para establecer la conexión P2P
- * (el host crea la sala y el offer; el visitor se une y responde). Ningún peer
- * es autoridad global del juego.
+ * Rol informativo de cómo se entró a la sala: 'host' = creó la sala,
+ * 'visitor' = se unió. NO implica propiedad ni autoridad sobre la Room;
+ * la negociación P2P la inicia quien ya está presente cuando llega el otro.
  */
 export type SessionRole = 'host' | 'visitor';
 
@@ -107,7 +107,7 @@ export class NetworkSession {
     return this.peerPresent;
   }
 
-  /** Ruta host: conecta el signaling, crea una sala y negocia el P2P. */
+  /** Ruta host: conecta el signaling, crea una sala y arme el transporte. */
   async createRoom(): Promise<string> {
     this.ensureIdle();
     this.status = 'connecting';
@@ -117,6 +117,7 @@ export class NetworkSession {
       await this.signaling.connect();
       const code = await this.signaling.createRoom();
       this.code = code;
+      this.status = 'connected';
       this.handlers.onRoomCreated?.(code);
       this.transport = this.makeTransport(this.signaling, this.transportHandlers(), 'host');
       await this.transport.connect();
@@ -128,7 +129,7 @@ export class NetworkSession {
     }
   }
 
-  /** Ruta visitor: conecta el signaling, se une a la sala y negocia el P2P. */
+  /** Ruta visitor: conecta el signaling, se une a la sala y arma el transporte. */
   async joinRoom(roomCode: string): Promise<void> {
     this.ensureIdle();
     this.status = 'connecting';
@@ -138,6 +139,7 @@ export class NetworkSession {
     try {
       await this.signaling.connect();
       await this.signaling.joinRoom(roomCode);
+      this.status = 'connected';
       this.handlers.onRoomCreated?.(roomCode);
       this.transport = this.makeTransport(this.signaling, this.transportHandlers(), 'visitor');
       await this.transport.connect();
@@ -205,7 +207,9 @@ export class NetworkSession {
       },
       onMessage: (message) => this.handlers.onMessage(message),
       onClose: (reason) => {
-        this.status = 'disconnected';
+        // La negociación P2P terminó (peer se fue / conexión perdida), pero la
+        // Room sigue viva: solo bajamos la presencia y avisamos. NO cambiamos
+        // el estado de la sesión (se queda en 'connected').
         this.peerPresent = false;
         this.handlers.onPeerLeft(reason);
       },

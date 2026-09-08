@@ -18,7 +18,10 @@ export interface TransportHandlers {
 }
 
 export interface NetworkTransport {
-  /** Negocia la conexión P2P y promete cuando el canal está abierto. */
+  /**
+   * Arma el transporte y se suscribe a señales del servidor. Resuelve de
+   * inmediato: la negociación P2P empieza cuando hay un peer disponible.
+   */
   connect(): Promise<void>;
   /** Envía un mensaje P2P. Devuelve false si el canal no está abierto. */
   send(message: PeerMessage): boolean;
