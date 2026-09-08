@@ -53,6 +53,16 @@ export class RoomScene extends Phaser.Scene {
   // Colección de objetos persistentes indexados por su RoomObjectState.id
   private roomObjects = new Map<string, RoomObject>();
 
+  // Handlers de drag por objeto para poder limpiarlos al eliminar/reemplazar
+  private objectDragHandlers = new Map<
+    string,
+    {
+      dragstart: (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => void;
+      drag: (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject, _dragX: number, _dragY: number) => void;
+      dragend: (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => void;
+    }
+  >();
+
   // Sistema de colisiones (necesario para reconciliar objetos)
   private collisionSystem!: CollisionSystem;
 
@@ -143,6 +153,15 @@ export class RoomScene extends Phaser.Scene {
     const obj = this.roomObjects.get(objectId);
     if (!obj) return;
 
+    // Limpiar listeners de drag ANTES de destruir el GameObject
+    const handlers = this.objectDragHandlers.get(objectId);
+    if (handlers) {
+      this.input.off('dragstart', handlers.dragstart);
+      this.input.off('drag', handlers.drag);
+      this.input.off('dragend', handlers.dragend);
+      this.objectDragHandlers.delete(objectId);
+    }
+
     // Destruir el GameObject visual
     obj.getGameObject().destroy();
 
@@ -174,7 +193,8 @@ export class RoomScene extends Phaser.Scene {
 
     this.input.setDraggable(objGO);
 
-    this.input.on('dragstart', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
+    // Definir handlers como funciones nombradas para poder eliminarlos después
+    const handleDragStart = (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject): void => {
       if (gameObject !== objGO) return;
       if (this.isDraggingObject) return;
       if (this.interactionSystem.tryInteractFromPointer(pointer)) return;
@@ -188,9 +208,9 @@ export class RoomScene extends Phaser.Scene {
       this.dragObjectStartY = pos.y;
       // Visual feedback: lift the object slightly
       objGO.setDepth(2);
-    });
+    };
 
-    this.input.on('drag', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject, _dragX: number, _dragY: number) => {
+    const handleDrag = (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject, _dragX: number, _dragY: number): void => {
       if (gameObject !== objGO) return;
       if (!this.isDraggingObject) return;
 
@@ -204,9 +224,9 @@ export class RoomScene extends Phaser.Scene {
 
       // Actualizar visualmente mientras se arrastra
       obj.setPosition(newX, newY);
-    });
+    };
 
-    this.input.on('dragend', async (_pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
+    const handleDragEnd = async (_pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject): Promise<void> => {
       if (gameObject !== objGO) return;
       if (!this.isDraggingObject) return;
 
@@ -220,7 +240,15 @@ export class RoomScene extends Phaser.Scene {
         const { x, y } = obj.getPosition();
         await this.requestObjectPositionUpdate(id, x, y);
       }
-    });
+    };
+
+    // Guardar handlers para poder limpiarlos al eliminar/reemplazar el objeto
+    this.objectDragHandlers.set(objectId, { dragstart: handleDragStart, drag: handleDrag, dragend: handleDragEnd });
+
+    // Registrar listeners
+    this.input.on('dragstart', handleDragStart);
+    this.input.on('drag', handleDrag);
+    this.input.on('dragend', handleDragEnd);
   }
 
   /** Solicita al servidor actualizar la posición de un objeto. */
