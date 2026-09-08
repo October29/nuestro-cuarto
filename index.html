@@ -59,6 +59,21 @@
         <button id="disconnect-btn" type="button" hidden>Salir de la sala</button>
       </div>
 
+      <div id="room-name-panel" hidden>
+        <span id="room-name-display"></span>
+        <button id="room-name-edit-btn" type="button" title="Editar nombre">✎</button>
+        <div id="room-name-edit-form" hidden>
+          <input
+            id="room-name-edit-input"
+            type="text"
+            maxlength="16"
+            autocomplete="off"
+          />
+          <button id="room-name-save-btn" type="button">Guardar</button>
+          <button id="room-name-cancel-btn" type="button">Cancelar</button>
+        </div>
+      </div>
+
       <div id="chat-panel" hidden>
         <div id="chat-messages"></div>
         <div class="chat-row">

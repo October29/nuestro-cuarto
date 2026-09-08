@@ -145,6 +145,77 @@
   font-size: 12px;
 }
 
+#room-name-panel {
+  pointer-events: auto;
+  background: rgba(24, 34, 56, 0.92);
+  border: 1px solid #3d4a72;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #d8deff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+}
+
+#room-name-display {
+  font-weight: 600;
+  color: #ffd98a;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#room-name-edit-btn {
+  background: transparent;
+  border: 1px solid #4a5a8a;
+  color: #ffd98a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+#room-name-edit-btn:hover {
+  background: #4a5a8a;
+}
+
+#room-name-edit-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+
+#room-name-edit-input {
+  flex: 1;
+  background: #101725;
+  color: #d8deff;
+  border: 1px solid #3d4a72;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 14px;
+  min-width: 150px;
+}
+
+#room-name-save-btn,
+#room-name-cancel-btn {
+  background: #4a5a8a;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#room-name-cancel-btn {
+  background: #333d5c;
+  color: #7b86ad;
+}
+
 #chat-panel {
   pointer-events: auto;
   width: 300px;

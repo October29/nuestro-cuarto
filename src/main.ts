@@ -4,12 +4,14 @@ import { gameConfig } from './game/config';
 import { RoomScene } from './game/scenes/RoomScene';
 import { ConnectMenu } from './ui/connectMenu';
 import { ChatPanel } from './ui/chatPanel';
+import { RoomNamePanel } from './ui/roomNamePanel';
 import type { RoomState } from './network/protocol';
 import '../style.css';
 
 const game = new Phaser.Game(gameConfig);
 
 const chatPanel = new ChatPanel();
+const roomNamePanel = new RoomNamePanel();
 const connectMenu = new ConnectMenu();
 
 connectMenu.setMessageCallback((message) => {
@@ -25,14 +27,17 @@ connectMenu.onSessionChange((session) => {
   );
   if (session) {
     chatPanel.bindSession(session);
+    roomNamePanel.bindSession(session);
   } else {
     chatPanel.unbindSession();
+    roomNamePanel.bindSession(null);
   }
   getRoomScene()?.setNetworkSession(session);
 });
 
 connectMenu.onRoomStateChange((state: RoomState) => {
   getRoomScene()?.setRoomState(state);
+  roomNamePanel.setRoomName(state.name);
 });
 
 function getRoomScene(): RoomScene | null {
