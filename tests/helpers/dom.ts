@@ -21,9 +21,11 @@ export interface DomStub {
   scrollTop: number;
   scrollHeight: number;
   appendChild: (node: unknown) => void;
+  children: unknown[];
   focusCount: number;
   blurCount: number;
   listeners: Record<string, Listener[]>;
+  type: string;
 }
 
 export interface ElementStub {
@@ -55,11 +57,16 @@ export function makeDomStub(tagName: string): DomStub {
     innerHTML: '',
     scrollTop: 0,
     scrollHeight: 0,
+    children: [],
+    type: 'button',
     appendChild: () => undefined,
     focusCount: 0,
     blurCount: 0,
   };
 
+  stub.appendChild = (node: unknown) => {
+    stub.children.push(node);
+  };
   stub.addEventListener = update;
   stub.removeEventListener = release;
   stub.focus = () => {
@@ -81,6 +88,8 @@ const documentListeners: Record<string, Listener[]> = {};
 
 const TAG_BY_ID: Record<string, string> = {
   'create-room-btn': 'BUTTON',
+  'new-room-name-input': 'INPUT',
+  'saved-rooms-list': 'UL',
   'room-code-display': 'DIV',
   'room-code-text': 'SPAN',
   'room-code-input': 'INPUT',
@@ -98,6 +107,8 @@ const TAG_BY_ID: Record<string, string> = {
 export function installDomMocks(): void {
   const ids = [
     'create-room-btn',
+    'new-room-name-input',
+    'saved-rooms-list',
     'room-code-display',
     'room-code-text',
     'room-code-input',
@@ -123,7 +134,7 @@ export function installDomMocks(): void {
   // @ts-expect-error override document global en el entorno de test
   globalThis.document = {
     getElementById: (id: string) => elements[id] ?? null,
-    createElement: () => makeElementStub(),
+    createElement: (tagName: string) => makeDomStub(tagName.toUpperCase()),
     addEventListener: (type: string, fn: Listener) => {
       (listeners[type] ??= []).push(fn);
     },

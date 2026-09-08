@@ -26,6 +26,18 @@
       <div id="connect-panel">
         <div class="connect-row">
           <button id="create-room-btn" type="button">Crear sala</button>
+          <input
+            id="new-room-name-input"
+            type="text"
+            maxlength="16"
+            placeholder="Nombre (opcional)"
+            autocomplete="off"
+          />
+        </div>
+        <div id="my-rooms">
+          <h3>Mis salas</h3>
+          <ul id="saved-rooms-list"></ul>
+          <p class="rooms-note">Olvidar solo la quita de tu libreta; la sala sigue existiendo.</p>
         </div>
         <div class="connect-row">
           <input

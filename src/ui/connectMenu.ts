@@ -1,5 +1,6 @@
 import { NetworkSession, type SessionHandlers, type SessionState } from '../network/NetworkSession';
 import type { PeerMessage } from '../network/protocol';
+import { RoomDirectory } from '../storage/roomDirectory';
 
 type StatusLabel = 'desconectado' | 'conectando...' | 'conectado' | 'desconectado (peer)' | 'error';
 
@@ -14,6 +15,8 @@ const STATUS_TEXT: Record<SessionState, StatusLabel> = {
 export interface ConnectMenuOptions {
   /** Cómo crear la sesión. Por defecto usa NetworkSession real; en pruebas se inyecta un mock. */
   createSession?: (handlers: SessionHandlers) => NetworkSession;
+  /** Libreta local de "Mis salas". Por defecto usa una nueva con localStorage. */
+  roomDirectory?: RoomDirectory;
 }
 
 export class ConnectMenu {
@@ -23,7 +26,15 @@ export class ConnectMenu {
   private readonly createSession: (handlers: SessionHandlers) => NetworkSession;
   private currentState: SessionState = 'idle';
 
+  private readonly directory: RoomDirectory;
+  /** true solo durante la creación de una sala: el código recién creado se
+   * guarda en la libreta al confirmarlo el servidor (onRoomCreated). */
+  private creatingRoom = false;
+  private pendingName: string | null = null;
+
   private readonly createBtn: HTMLButtonElement;
+  private readonly newRoomNameInput: HTMLInputElement;
+  private readonly savedRoomsList: HTMLUListElement;
   private readonly codeDisplay: HTMLDivElement;
   private readonly codeText: HTMLSpanElement;
   private readonly codeInput: HTMLInputElement;
@@ -34,8 +45,11 @@ export class ConnectMenu {
 
   constructor(options: ConnectMenuOptions = {}) {
     this.createSession = options.createSession ?? ((handlers) => new NetworkSession({ handlers }));
+    this.directory = options.roomDirectory ?? new RoomDirectory();
 
     this.createBtn = document.getElementById('create-room-btn') as HTMLButtonElement;
+    this.newRoomNameInput = document.getElementById('new-room-name-input') as HTMLInputElement;
+    this.savedRoomsList = document.getElementById('saved-rooms-list') as HTMLUListElement;
     this.codeDisplay = document.getElementById('room-code-display') as HTMLDivElement;
     this.codeText = document.getElementById('room-code-text') as HTMLSpanElement;
     this.codeInput = document.getElementById('room-code-input') as HTMLInputElement;
@@ -52,6 +66,7 @@ export class ConnectMenu {
     });
     this.codeInput.addEventListener('input', () => this.updateJoinButton());
 
+    this.renderSavedRooms();
     this.resetUI();
   }
 
@@ -85,6 +100,10 @@ export class ConnectMenu {
     this.resetError();
     this.setUIState('connecting');
 
+    const name = this.newRoomNameInput.value.trim();
+    this.creatingRoom = true;
+    this.pendingName = name.length > 0 ? name : null;
+
     const handlers: SessionHandlers = this.buildHandlers();
     this.session = this.createSession(handlers);
 
@@ -96,6 +115,8 @@ export class ConnectMenu {
       this.setUIState('connected');
       this.notifySessionChanged();
     } catch (error) {
+      this.creatingRoom = false;
+      this.pendingName = null;
       this.session = null;
       this.showError(error instanceof Error ? error.message : String(error));
       this.setUIState('idle');
@@ -105,6 +126,8 @@ export class ConnectMenu {
 
   private async handleJoin(): Promise<void> {
     this.resetError();
+    this.creatingRoom = false;
+    this.pendingName = null;
     const code = this.codeInput.value.trim().toUpperCase();
     if (code.length !== 6) {
       this.showError('El código debe tener 6 caracteres');
@@ -127,6 +150,72 @@ export class ConnectMenu {
       this.showError(error instanceof Error ? error.message : String(error));
       this.setUIState('idle');
       this.notifySessionChanged();
+    }
+  }
+
+  /** Entra en una sala desde "Mis salas": joinRoom(roomId), sin resume. */
+  private async enterSavedRoom(roomId: string): Promise<void> {
+    this.resetError();
+    this.creatingRoom = false;
+    this.pendingName = null;
+    this.codeInput.value = roomId;
+
+    this.setUIState('connecting');
+    const handlers: SessionHandlers = this.buildHandlers();
+    this.session = this.createSession(handlers);
+
+    try {
+      await this.session.joinRoom(roomId);
+      this.codeText.textContent = roomId;
+      this.codeDisplay.hidden = false;
+      this.codeInput.disabled = true;
+      this.setUIState('connected');
+      this.notifySessionChanged();
+    } catch (error) {
+      // La sala no existe (o no se puede entrar): se propaga el error y NO se
+      // inventa una sala nueva automáticamente.
+      this.session = null;
+      this.showError(error instanceof Error ? error.message : String(error));
+      this.setUIState('idle');
+      this.notifySessionChanged();
+    }
+  }
+
+  /** Olvida una sala de la libreta local. NO toca la Room del servidor. */
+  private forgetSavedRoom(roomId: string): void {
+    this.directory.remove(roomId);
+    this.renderSavedRooms();
+  }
+
+  private renderSavedRooms(): void {
+    this.savedRoomsList.innerHTML = '';
+    for (const room of this.directory.list()) {
+      const li = document.createElement('li');
+      li.className = 'saved-room';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'room-name';
+      nameSpan.textContent = room.name;
+
+      const idSpan = document.createElement('span');
+      idSpan.className = 'room-id';
+      idSpan.textContent = room.roomId;
+
+      const enterBtn = document.createElement('button');
+      enterBtn.type = 'button';
+      enterBtn.textContent = 'Entrar';
+      enterBtn.addEventListener('click', () => void this.enterSavedRoom(room.roomId));
+
+      const forgetBtn = document.createElement('button');
+      forgetBtn.type = 'button';
+      forgetBtn.textContent = 'Olvidar';
+      forgetBtn.addEventListener('click', () => this.forgetSavedRoom(room.roomId));
+
+      li.appendChild(nameSpan);
+      li.appendChild(idSpan);
+      li.appendChild(enterBtn);
+      li.appendChild(forgetBtn);
+      this.savedRoomsList.appendChild(li);
     }
   }
 
@@ -166,6 +255,15 @@ export class ConnectMenu {
         this.codeText.textContent = code;
         this.codeDisplay.hidden = false;
         this.codeInput.disabled = true;
+        // La creación confirmada por el servidor se guarda en la libreta.
+        if (this.creatingRoom) {
+          const name = this.pendingName ?? `Sala ${code}`;
+          this.directory.save(code, name);
+          this.creatingRoom = false;
+          this.pendingName = null;
+          this.newRoomNameInput.value = '';
+          this.renderSavedRooms();
+        }
       },
     };
   }

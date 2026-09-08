@@ -58,6 +58,51 @@
   align-items: center;
 }
 
+#my-rooms h3 {
+  margin: 0;
+  font-size: 13px;
+  color: #aab6e0;
+}
+
+#saved-rooms-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.saved-room {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.saved-room .room-name {
+  color: #ffd98a;
+  font-weight: 600;
+}
+
+.saved-room .room-id {
+  color: #aab6e0;
+  font-family: monospace;
+}
+
+.saved-room button {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.rooms-note {
+  margin: 0;
+  font-size: 11px;
+  color: #7b86ad;
+}
+
 #room-code-display {
   font-weight: 600;
   color: #ffd98a;
