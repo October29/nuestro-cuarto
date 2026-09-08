@@ -97,6 +97,24 @@ export class SignalingClient {
     this.send({ type: 'signal', data });
   }
 
+  /**
+   * Anuncia el abandono de la sala en la que esta conexión está presente.
+   *
+   * Concepto opuesto a close():
+   *   - leave(): "quiero abandonar la sala". El servidor retira la presencia y
+   *     avisa al resto con peer-left; la Room (entidad server-owned) sigue
+   *     existiendo. La conexión WebSocket permanece abierta.
+   *   - close(): "cierro esta conexión". Se cierra el WebSocket; desconectarse
+   *     sin leave() también deja la sala, pero la Room tampoco se destruye
+   *     (Paso 1 Room-first).
+   *
+   * Es un no-op si la conexión no está abierta. El servidor no responde a
+   * leave: la noticia llega al resto de participantes como peer-left.
+   */
+  leave(): void {
+    this.send({ type: 'leave' });
+  }
+
   close(): void {
     this.pending?.reject(new Error('signaling: conexión cerrada'));
     this.pending = null;

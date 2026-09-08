@@ -89,3 +89,18 @@ export class WsTestClient {
     }
   }
 }
+
+/** Espera hasta que la condición se cumpla (mensajes asíncronos del servidor). */
+export async function waitFor(
+  condition: () => boolean,
+  timeoutMs = 2000,
+  stepMs = 20,
+): Promise<void> {
+  const start = Date.now();
+  while (!condition()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('waitFor: la condición no se cumplió en el tiempo esperado');
+    }
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+}

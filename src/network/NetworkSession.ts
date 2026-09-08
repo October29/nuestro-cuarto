@@ -62,6 +62,8 @@ export class NetworkSession {
   private status: SessionState = 'idle';
   private code: string | null = null;
   private sessionRole: SessionRole | null = null;
+  private unsubscribeSignaling: (() => void) | null = null;
+  private peerPresent = false;
 
   /** Instrumentación temporal M07-A: id de diagnóstico de esta instancia. */
   readonly diagId = ++nextDiagId;
@@ -72,6 +74,15 @@ export class NetworkSession {
     this.makeTransport =
       options.makeTransport ??
       ((signaling, handlers, role) => new RtcPeerTransport(signaling, handlers, role));
+
+    // Room-first (Paso 2): los avisos de presencia del signaling actualizan
+    // "¿hay otro participante?" sin tocar el ciclo de vida de ESTA sesión.
+    // peer-left significa que el otro ya no está conectado, NO que nuestra
+    // sesión haya terminado: aquí solo se baja el flag.
+    this.unsubscribeSignaling = this.signaling.subscribe((message) => {
+      if (message.type === 'peer-joined') this.peerPresent = true;
+      else if (message.type === 'peer-left') this.peerPresent = false;
+    });
 
     diagLog('NetworkSession created', { diagId: this.diagId });
   }
@@ -86,6 +97,14 @@ export class NetworkSession {
 
   get role(): SessionRole | null {
     return this.sessionRole;
+  }
+
+  /** ¿Hay otro participante presente en la Room desde esta sesión? Cuando el
+   * peer se va (peer-left del signaling o cierre del canal de datos), bajamos
+   * el flag pero NO cerramos la sesión: la Room sigue viva y preparada para
+   * que entre otro participante más adelante. */
+  get hasPeer(): boolean {
+    return this.peerPresent;
   }
 
   /** Ruta host: conecta el signaling, crea una sala y negocia el P2P. */
@@ -137,9 +156,32 @@ export class NetworkSession {
 
   /** Cierre local de la sesión (no notifica onPeerLeft: lo hace el usuario). */
   close(): void {
+    this.tearDown();
+  }
+
+  /**
+   * Abandona la sala manteniéndola viva en el servidor (Room-first).
+   *
+   * Representa "este cliente abandona la Room": anuncia el abandono al
+   * signaling (leave) y luego cierra su transporte y su conexión. La Room
+   * es server-owned y no se destruye; cualquier participante podrá reentrar
+   * después. Diferencia conceptual con close():
+   *   - leave()  = quiero abandonar la sala (abandono explícito).
+   *   - close()  = cierro esta conexión (fin local, sin anuncio).
+   * No notifica onPeerLeft: el abandono es intencional y local.
+   */
+  leave(): void {
+    this.signaling.leave();
+    this.tearDown();
+  }
+
+  private tearDown(): void {
     this.transport?.close();
     this.transport = null;
     this.signaling.close();
+    this.unsubscribeSignaling?.();
+    this.unsubscribeSignaling = null;
+    this.peerPresent = false;
     this.status = 'disconnected';
   }
 
@@ -156,11 +198,15 @@ export class NetworkSession {
     return {
       onOpen: () => {
         this.status = 'connected';
+        // Un canal de datos abierto implica que el peer en la otra punta
+        // existe: la presencia también se refleja aquí.
+        this.peerPresent = true;
         this.handlers.onOpen(this.code ?? '');
       },
       onMessage: (message) => this.handlers.onMessage(message),
       onClose: (reason) => {
         this.status = 'disconnected';
+        this.peerPresent = false;
         this.handlers.onPeerLeft(reason);
       },
       onError: (error) => this.handlers.onError(new Error(error)),
