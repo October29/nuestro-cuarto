@@ -142,11 +142,10 @@ export class PlayerSync {
   }
 
   // Instrumentación temporal M07-A: rastro del ciclo de vida de la sync para
-  // diagnosticar el RemotePlayer duplicado visible SOLO en el host.
+  // diagnosticar el RemotePlayer duplicado visible en una sola ventana.
   private diag(event: string, extra: Record<string, unknown> = {}): void {
-    const role = this.session.role === 'host' ? 'HOST' : this.session.role === 'visitor' ? 'VISITOR' : '?';
     console.log(
-      `[M07A-DIAG] [${role}] [${new Date().toISOString()}] [PlayerSync ${event}]`,
+      `[M07A-DIAG] [${new Date().toISOString()}] [PlayerSync ${event}]`,
       JSON.stringify({ localPlayerId: this.localPlayerId, session: this.session.diagId, ...extra }),
     );
   }

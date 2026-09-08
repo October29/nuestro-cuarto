@@ -136,6 +136,15 @@
   font-size: 13px;
 }
 
+#peer-status {
+  color: #b6c2ff;
+  background: rgba(255, 217, 138, 0.1);
+  border: 1px solid rgba(255, 217, 138, 0.35);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 #chat-panel {
   pointer-events: auto;
   width: 300px;

@@ -40,6 +40,7 @@ export class ConnectMenu {
   private readonly codeInput: HTMLInputElement;
   private readonly joinBtn: HTMLButtonElement;
   private readonly statusDiv: HTMLDivElement;
+  private readonly peerStatus: HTMLDivElement;
   private readonly disconnectBtn: HTMLButtonElement;
   private readonly errorMsg: HTMLDivElement;
 
@@ -55,6 +56,8 @@ export class ConnectMenu {
     this.codeInput = document.getElementById('room-code-input') as HTMLInputElement;
     this.joinBtn = document.getElementById('join-room-btn') as HTMLButtonElement;
     this.statusDiv = document.getElementById('connection-status') as HTMLDivElement;
+    this.peerStatus = document.getElementById('peer-status') as HTMLDivElement;
+    this.peerStatus.textContent = 'Tu amistad salió de la sala.';
     this.disconnectBtn = document.getElementById('disconnect-btn') as HTMLButtonElement;
     this.errorMsg = document.getElementById('connection-error') as HTMLDivElement;
 
@@ -254,14 +257,21 @@ export class ConnectMenu {
     return {
       onOpen: () => {
         this.setUIState('connected');
+        // Un canal abierto implica que el peer está: ocultamos el aviso de
+        // abandono por si quedara visible.
+        this.setPeerStatus(false);
         // Notificación de sesión la da handleCreate/handleJoin tras la resolución
         // de createRoom/joinRoom. Aquí solo actualizamos el estado visual de la UI.
       },
       onMessage: (message) => this.onMessage?.(message),
+      onPeerJoined: () => {
+        // El peer volvió a estar presente: ocultamos el aviso de abandono.
+        this.setPeerStatus(false);
+      },
       onPeerLeft: () => {
         // El peer se fue, pero la Room sigue viva y esta sesión permanece en
-        // ella: no dejamos la sala ni desmontamos la sesión. El estado visual
-        // de la UI sigue siendo 'conectado'.
+        // ella: no dejamos la sala ni desmontamos la sesión. Solo avisamos.
+        this.setPeerStatus(true);
       },
       onError: (error) => {
         this.showError(error.message);
@@ -295,12 +305,19 @@ export class ConnectMenu {
     this.disconnectBtn.hidden = !connected;
     this.statusDiv.textContent = STATUS_TEXT[state];
     this.statusDiv.className = `status-${state}`;
+    if (!connected) this.setPeerStatus(false);
+  }
+
+  /** Aviso de presencia: true muestra "Tu amistad salió de la sala". */
+  private setPeerStatus(show: boolean): void {
+    this.peerStatus.hidden = !show;
   }
 
   private resetUI(): void {
     this.currentState = 'idle';
     this.codeDisplay.hidden = true;
     this.disconnectBtn.hidden = true;
+    this.peerStatus.hidden = true;
     this.codeInput.value = '';
     this.codeInput.disabled = false;
     this.createBtn.disabled = false;

@@ -5,18 +5,13 @@ import type { NetworkTransport, TransportHandlers } from './NetworkTransport';
 
 export type SessionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
-/**
- * Rol informativo de cómo se entró a la sala: 'host' = creó la sala,
- * 'visitor' = se unió. NO implica propiedad ni autoridad sobre la Room;
- * la negociación P2P la inicia quien ya está presente cuando llega el otro.
- */
-export type SessionRole = 'host' | 'visitor';
-
 export interface SessionHandlers {
   /** La sesión quedó lista: sala creada/unida y canal de datos abierto. */
   onOpen(roomCode: string): void;
   /** Mensaje P2P tipado recibido del otro participante. */
   onMessage(message: PeerMessage): void;
+  /** Otro participante acaba de estar presente en la sala (peer-joined). */
+  onPeerJoined?(): void;
   /** El otro participante se desconectó o la conexión se perdió. */
   onPeerLeft(reason: string): void;
   /** Error básico del signaling o de la negociación P2P. */
@@ -37,7 +32,6 @@ export interface NetworkSessionOptions {
   makeTransport?: (
     signaling: SignalingClient,
     handlers: TransportHandlers,
-    role: SessionRole,
   ) => NetworkTransport;
 }
 
@@ -61,7 +55,6 @@ export class NetworkSession {
   private handlers: SessionHandlers;
   private status: SessionState = 'idle';
   private code: string | null = null;
-  private sessionRole: SessionRole | null = null;
   private unsubscribeSignaling: (() => void) | null = null;
   private peerPresent = false;
 
@@ -73,15 +66,20 @@ export class NetworkSession {
     this.signaling = new SignalingClient(options.signalingUrl);
     this.makeTransport =
       options.makeTransport ??
-      ((signaling, handlers, role) => new RtcPeerTransport(signaling, handlers, role));
+      ((signaling, handlers) => new RtcPeerTransport(signaling, handlers));
 
-    // Room-first (Paso 2): los avisos de presencia del signaling actualizan
+    // Room-first (Pasos 2-5): los avisos de presencia del signaling actualizan
     // "¿hay otro participante?" sin tocar el ciclo de vida de ESTA sesión.
-    // peer-left significa que el otro ya no está conectado, NO que nuestra
-    // sesión haya terminado: aquí solo se baja el flag.
+    // peer-joined avisa a la UI; peer-left significa que el otro ya no está
+    // conectado, NO que nuestra sesión haya terminado: aquí solo se baja el
+    // flag y no se cierra nada.
     this.unsubscribeSignaling = this.signaling.subscribe((message) => {
-      if (message.type === 'peer-joined') this.peerPresent = true;
-      else if (message.type === 'peer-left') this.peerPresent = false;
+      if (message.type === 'peer-joined') {
+        this.peerPresent = true;
+        this.handlers.onPeerJoined?.();
+      } else if (message.type === 'peer-left') {
+        this.peerPresent = false;
+      }
     });
 
     diagLog('NetworkSession created', { diagId: this.diagId });
@@ -95,10 +93,6 @@ export class NetworkSession {
     return this.code;
   }
 
-  get role(): SessionRole | null {
-    return this.sessionRole;
-  }
-
   /** ¿Hay otro participante presente en la Room desde esta sesión? Cuando el
    * peer se va (peer-left del signaling o cierre del canal de datos), bajamos
    * el flag pero NO cerramos la sesión: la Room sigue viva y preparada para
@@ -107,11 +101,10 @@ export class NetworkSession {
     return this.peerPresent;
   }
 
-  /** Ruta host: conecta el signaling, crea una sala y arme el transporte. */
+  /** Ruta creador: conecta el signaling, crea una sala y arma el transporte. */
   async createRoom(): Promise<string> {
     this.ensureIdle();
     this.status = 'connecting';
-    this.sessionRole = 'host';
 
     try {
       await this.signaling.connect();
@@ -119,9 +112,9 @@ export class NetworkSession {
       this.code = code;
       this.status = 'connected';
       this.handlers.onRoomCreated?.(code);
-      this.transport = this.makeTransport(this.signaling, this.transportHandlers(), 'host');
+      this.transport = this.makeTransport(this.signaling, this.transportHandlers());
       await this.transport.connect();
-      diagLog('NetworkSession createRoom resolvió', { diagId: this.diagId, role: 'host', roomCode: code });
+      diagLog('NetworkSession createRoom resolvió', { diagId: this.diagId, roomCode: code });
       return code;
     } catch (error) {
       this.fail(error);
@@ -129,11 +122,10 @@ export class NetworkSession {
     }
   }
 
-  /** Ruta visitor: conecta el signaling, se une a la sala y arma el transporte. */
+  /** Ruta de entrada: conecta el signaling, se une a la sala y arma el transporte. */
   async joinRoom(roomCode: string): Promise<void> {
     this.ensureIdle();
     this.status = 'connecting';
-    this.sessionRole = 'visitor';
     this.code = roomCode;
 
     try {
@@ -141,9 +133,9 @@ export class NetworkSession {
       await this.signaling.joinRoom(roomCode);
       this.status = 'connected';
       this.handlers.onRoomCreated?.(roomCode);
-      this.transport = this.makeTransport(this.signaling, this.transportHandlers(), 'visitor');
+      this.transport = this.makeTransport(this.signaling, this.transportHandlers());
       await this.transport.connect();
-      diagLog('NetworkSession joinRoom resolvió', { diagId: this.diagId, role: 'visitor', roomCode });
+      diagLog('NetworkSession joinRoom resolvió', { diagId: this.diagId, roomCode });
     } catch (error) {
       this.fail(error);
       throw error;

@@ -24,9 +24,9 @@ export type TransportState = 'idle' | 'connecting' | 'open' | 'closed';
  * P2P actual (resetNegotiation) pero el transporte permanece armado y listo
  * para re-negociar con el siguiente participante.
  *
- * El parámetro `role` se mantiene por compatibilidad pero NO determina quién
- * inicia la negociación: lo hace quien ya está presente en la sala cuando
- * llega el otro (offerer) y el que acaba de llegar responde (answerer).
+ * No existe concepto de host/visitor: quién inicia la negociación (offerer)
+ * es quien ya está presente en la sala cuando llega el otro; el que acaba de
+ * llegar responde (answerer). Es un detalle interno de transporte.
  */
 export class RtcPeerTransport implements NetworkTransport {
   private connection: RTCPeerConnection | null = null;
@@ -39,9 +39,6 @@ export class RtcPeerTransport implements NetworkTransport {
   constructor(
     private readonly signaling: SignalingClient,
     private readonly handlers: TransportHandlers,
-    // Legacy: se conserva por compatibilidad de firma, pero ya no se usa.
-    // La negociación la inicia quien está presente, no el rol.
-    _role: 'host' | 'visitor',
     private readonly iceServers: RTCIceServer[] = DEFAULT_ICE_SERVERS,
   ) {}
 

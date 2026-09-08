@@ -64,12 +64,30 @@ function buildConnectMenu() {
   return menu;
 }
 
-async function getMockSession(menu: ConnectMenu): Promise<MockSession> {
+function getMockSession(menu: ConnectMenu): MockSession {
   // Al crear la sala se usa el mock inyectado; recuperamos la referencia que
   // ConnectMenu guardó internamente.
   const session = (menu as { session: MockSession | null }).session;
   assert.ok(session, 'debe existir una sesión mock');
   return session;
+}
+
+/** Como buildConnectMenu pero captura los SessionHandlers que recibió el mock. */
+function buildConnectMenuWithHandlers(): { menu: ConnectMenu; handlers: () => SessionHandlers } {
+  let captured: SessionHandlers | null = null;
+  const menu = new ConnectMenu({
+    createSession: (handlers) => {
+      captured = handlers;
+      return new MockSession(handlers as SessionHandlers) as never;
+    },
+  });
+  return {
+    menu,
+    handlers: () => {
+      assert.ok(captured, 'los handlers deben quedar capturados tras crear la sesión');
+      return captured as SessionHandlers;
+    },
+  };
 }
 
 describe('ConnectMenu: una sola NetworkSession produce una sola notificación de sesión', () => {
@@ -157,5 +175,25 @@ describe('ConnectMenu: una sola NetworkSession produce una sola notificación de
 
     assert.equal(received.length, 1, 'el chat debe recibir el mensaje remoto');
     assert.deepEqual(received[0], { type: 'chat', playerId: 'peer-1', text: 'hola' });
+  });
+
+  it('peer-left muestra el aviso de abandono y peer-joined lo oculta, sin desmontar la sesión', async () => {
+    const { menu, handlers } = buildConnectMenuWithHandlers();
+
+    await (menu as { handleCreate(): Promise<void> }).handleCreate();
+    assert.equal(getElement('peer-status').hidden, true, 'tras conectarse no hay aviso');
+
+    handlers().onPeerLeft('el peer se fue');
+
+    assert.equal(getElement('peer-status').hidden, false, 'el aviso de abandono se muestra');
+    assert.match(getElement('peer-status').textContent, /amistad salió de la sala/);
+    // peer-left NO expulsa: la sesión sigue viva y la UI sigue conectada.
+    assert.ok(getMockSession(menu) instanceof MockSession, 'la sesión no se desmonta');
+    assert.equal(getElement('connection-status').textContent, 'conectado');
+
+    handlers().onPeerJoined?.();
+
+    assert.equal(getElement('peer-status').hidden, true, 'peer-joined oculta el aviso');
+    assert.equal(getElement('connection-status').textContent, 'conectado');
   });
 });

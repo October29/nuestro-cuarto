@@ -97,6 +97,50 @@ class NegotiatingTransport implements NetworkTransport {
   }
 }
 
+/**
+ * Transporte mock que simula un fallo de negociación WebRTC: el primer
+ * peer-joined provoca onError (sin abrir canal); las siguientes apariciones
+ * de presencia abren el canal (una nueva negociación puede tener éxito).
+ * La Room y la sesión deben seguir vivas tras el fallo.
+ */
+class FlakyTransport implements NetworkTransport {
+  public negotiationAttempts = 0;
+  public closeCalls = 0;
+  private firstAttemptFailed = false;
+  private unsubscribe: (() => void) | null = null;
+
+  constructor(
+    private readonly signaling: TestSignaling,
+    private readonly handlers: TransportHandlers,
+  ) {}
+
+  connect(): Promise<void> {
+    this.unsubscribe = this.signaling.subscribe((message) => {
+      const m = message as { type?: string };
+      if (m.type === 'peer-joined') {
+        this.negotiationAttempts += 1;
+        if (!this.firstAttemptFailed) {
+          this.firstAttemptFailed = true;
+          this.handlers.onError('fallo de negociación simulado');
+        } else {
+          this.handlers.onOpen();
+        }
+      }
+    });
+    return Promise.resolve();
+  }
+
+  send(): boolean {
+    return true;
+  }
+
+  close(): void {
+    this.closeCalls += 1;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+  }
+}
+
 interface TrackedSession {
   session: NetworkSession;
   readonly transport: NegotiatingTransport;
@@ -130,6 +174,34 @@ function makeNegotiatingSession(s: TestSignalingServer): TrackedSession {
     get transport(): NegotiatingTransport {
       assert.ok(transport, 'el transporte aún no se ha creado');
       return transport as NegotiatingTransport;
+    },
+  };
+}
+
+function makeFlakySession(s: TestSignalingServer): { session: NetworkSession; transport: FlakyTransport; events: string[] } {
+  let transport: FlakyTransport | null = null;
+  const events: string[] = [];
+  const handlers: SessionHandlers = {
+    onOpen: () => events.push('onOpen'),
+    onMessage: () => events.push('onMessage'),
+    onPeerLeft: () => events.push('onPeerLeft'),
+    onError: () => events.push('onError'),
+    onRoomCreated: () => events.push('onRoomCreated'),
+  };
+  const session = new NetworkSession({
+    handlers,
+    signalingUrl: s.url,
+    makeTransport: (signaling, transportHandlers) => {
+      transport = new FlakyTransport(signaling as unknown as TestSignaling, transportHandlers);
+      return transport;
+    },
+  });
+  return {
+    session,
+    events,
+    get transport(): FlakyTransport {
+      assert.ok(transport, 'el transporte aún no se ha creado');
+      return transport as FlakyTransport;
     },
   };
 }
@@ -345,5 +417,39 @@ describe('Paso 4: Room y transporte se resuelven por separado', () => {
 
     creator.session.close();
     fromSaved.session.close();
+  });
+
+  test('una negociación fallida no destruye la Room y una nueva presencia re-negocia', async () => {
+    const s = await withServer();
+    const host = makeFlakySession(s);
+    const code = await host.session.createRoom();
+
+    // Primer peer entra: la primera negociación falla (el transporte llama onError).
+    const first = makeNegotiatingSession(s);
+    await first.session.joinRoom(code);
+    await waitFor(() => host.events.includes('onError'));
+
+    // La Room y la sesión siguen vivas; el error solo se propaga.
+    assert.equal(host.session.state, 'connected', 'el fallo de negociación no destruye la Room');
+    assert.equal(host.session.roomCode, code, 'roomCode se conserva');
+    assert.equal(host.session.hasPeer, true, 'la presencia viene del signaling, no del canal');
+    assert.equal(host.transport.negotiationAttempts, 1);
+    assert.equal(host.transport.closeCalls, 0, 'el transporte no se cierra: queda armado');
+    assert.ok(!host.events.includes('onOpen'), 'la primera negociación no abrió canal');
+
+    // El peer se va; llega otro: la nueva presencia vuelve a provocar negociación.
+    first.session.leave();
+    await waitFor(() => host.session.hasPeer === false);
+
+    const second = makeNegotiatingSession(s);
+    await second.session.joinRoom(code);
+    await waitFor(() => host.events.includes('onOpen'));
+
+    assert.equal(host.transport.negotiationAttempts, 2, 'la nueva presencia re-provocó la negociación');
+    assert.equal(host.session.state, 'connected');
+    assert.equal(host.session.hasPeer, true);
+
+    host.session.close();
+    second.session.close();
   });
 });

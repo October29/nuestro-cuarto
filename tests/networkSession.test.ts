@@ -159,3 +159,29 @@ describe('NetworkSession.leave(): abandono explícito de la sala', () => {
     await latecomer.session.close();
   });
 });
+
+describe('Paso 5: el contrato público no expone semántica HOST/VISITOR', () => {
+  test('NetworkSession no ofrece getter role ni etiquetas host/visitor', () => {
+    const handlers: SessionHandlers = {
+      onOpen: () => {},
+      onMessage: () => {},
+      onPeerLeft: () => {},
+      onError: () => {},
+    };
+    const session = new NetworkSession({ handlers });
+    const api = session as unknown as Record<string, unknown>;
+
+    assert.equal('role' in api, false, 'no debe existir role en el contrato público');
+    assert.equal(api.role, undefined);
+
+    // El resto del contrato público orientado a la Room sí está presente.
+    assert.equal('roomCode' in api, true, 'roomCode sigue existiendo');
+    assert.equal('hasPeer' in api, true, 'hasPeer sigue existiendo');
+    assert.equal('state' in api, true, 'state sigue existiendo');
+    assert.equal('send' in api, true, 'send sigue existiendo');
+    assert.equal('leave' in api, true, 'leave sigue existiendo');
+    assert.equal('close' in api, true, 'close sigue existiendo');
+    assert.equal('createRoom' in api, true, 'createRoom sigue existiendo');
+    assert.equal('joinRoom' in api, true, 'joinRoom sigue existiendo');
+  });
+});
