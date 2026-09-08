@@ -69,6 +69,22 @@ export class InteractionSystem {
     this.interactables.push(interactable);
   }
 
+  /** Elimina un interactable del sistema. */
+  removeInteractable(interactable: Interactable): void {
+    const index = this.interactables.indexOf(interactable);
+    if (index !== -1) {
+      this.interactables.splice(index, 1);
+    }
+    // Si era el target actual, limpiarlo
+    if (this.currentTarget === interactable) {
+      this.currentTarget = null;
+    }
+    // Si era el sentado, limpiarlo
+    if (this.seatedInteractable === interactable) {
+      this.seatedInteractable = null;
+    }
+  }
+
   /** Punto de salida del interactuable sobre el que el Player está sentado, si existe. */
   getSeatedExitPoint(): { x: number; y: number } | null {
     return this.seatedInteractable ? this.seatedInteractable.getExitPoint() : null;

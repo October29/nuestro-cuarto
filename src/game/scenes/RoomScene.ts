@@ -53,6 +53,9 @@ export class RoomScene extends Phaser.Scene {
   // Colección de objetos persistentes indexados por su RoomObjectState.id
   private roomObjects = new Map<string, RoomObject>();
 
+  // Sistema de colisiones (necesario para reconciliar objetos)
+  private collisionSystem!: CollisionSystem;
+
   // Estado de arrastre del objeto que se está moviendo
   private isDraggingObject = false;
   private draggedObjectId: string | null = null;
@@ -76,16 +79,16 @@ export class RoomScene extends Phaser.Scene {
       this.roomHeight = this.roomState.height;
     }
 
-    const collisionSystem = new CollisionSystem();
+    this.collisionSystem = new CollisionSystem();
 
     this.rebuildGeometry();
 
-    this.player = new Player(this, this.roomWidth / 2, this.roomHeight - 110, collisionSystem);
+    this.player = new Player(this, this.roomWidth / 2, this.roomHeight - 110, this.collisionSystem);
     this.player.setDepth(1);
 
     const objects = this.roomState?.objects ?? DEFAULT_OBJECTS;
     for (const obj of objects) {
-      this.createRoomObject(obj, collisionSystem);
+      this.createRoomObject(obj, this.collisionSystem);
     }
 
     this.interactionSystem = new InteractionSystem(this, this.player, Phaser);
@@ -132,6 +135,33 @@ export class RoomScene extends Phaser.Scene {
     this.roomObjects.set(state.id, obj);
     collisionSystem.addObstacle(obj);
     this.interactionSystem.addInteractable(obj);
+    this.setupObjectDrag(state.id);
+  }
+
+  /** Elimina un objeto de la escena y limpia todos sus recursos. */
+  private removeRoomObject(objectId: string): void {
+    const obj = this.roomObjects.get(objectId);
+    if (!obj) return;
+
+    // Destruir el GameObject visual
+    obj.getGameObject().destroy();
+
+    // Quitar del sistema de colisiones
+    this.collisionSystem?.removeObstacle(obj);
+
+    // Quitar del sistema de interacción
+    this.interactionSystem.removeInteractable(obj);
+
+    // Quitar del Map
+    this.roomObjects.delete(objectId);
+  }
+
+  /** Reemplaza un objeto existente por uno nuevo del mismo ID pero distinto tipo. */
+  private replaceRoomObject(state: RoomObjectState, collisionSystem: CollisionSystem): void {
+    // Eliminar el anterior
+    this.removeRoomObject(state.id);
+    // Crear el nuevo
+    this.createRoomObject(state, collisionSystem);
   }
 
   /** Configura el arrastre del objeto con el puntero. */
@@ -310,17 +340,42 @@ export class RoomScene extends Phaser.Scene {
       }
     }
 
-    // Actualizar posición de objetos existentes sin recrearlos
-    if (prevState) {
-      for (const newObj of state.objects) {
-        const prevObj = prevState.objects.find((o) => o.id === newObj.id);
-        if (prevObj && (prevObj.x !== newObj.x || prevObj.y !== newObj.y)) {
-          const obj = this.roomObjects.get(newObj.id);
-          if (obj) {
-            obj.setPosition(newObj.x, newObj.y);
-          }
+    // Reconciliar objetos: crear nuevos, actualizar existentes, eliminar ausentes
+    this.reconcileRoomObjects(prevState, state);
+  }
+
+  /** Reconcilia la colección de objetos con el nuevo RoomState. */
+  private reconcileRoomObjects(prevState: RoomState | null, state: RoomState): void {
+    const prevIds = new Set(prevState?.objects.map((o) => o.id) ?? []);
+    const newIds = new Set(state.objects.map((o) => o.id));
+
+    const collisionSystem = this.collisionSystem; // from create() scope, need to store it
+
+    // 1. Eliminar objetos que ya no están en el nuevo estado
+    for (const id of prevIds) {
+      if (!newIds.has(id)) {
+        this.removeRoomObject(id);
+      }
+    }
+
+    // 2. Crear o actualizar objetos en el nuevo estado
+    for (const newObj of state.objects) {
+      const prevObj = prevState?.objects.find((o) => o.id === newObj.id);
+
+      if (!prevObj) {
+        // Nuevo objeto: crearlo
+        this.createRoomObject(newObj, collisionSystem);
+      } else if (prevObj.type !== newObj.type) {
+        // Cambio de tipo: reemplazar
+        this.replaceRoomObject(newObj, collisionSystem);
+      } else if (prevObj.x !== newObj.x || prevObj.y !== newObj.y) {
+        // Mismo objeto, posición cambiada: actualizar
+        const obj = this.roomObjects.get(newObj.id);
+        if (obj) {
+          obj.setPosition(newObj.x, newObj.y);
         }
       }
+      // Si no cambió nada (mismo ID, mismo tipo, misma posición), no hacer nada
     }
   }
 

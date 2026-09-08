@@ -22,6 +22,15 @@ export class CollisionSystem {
     this.obstacles.push(obstacle.getCollisionRect());
   }
 
+  /** Elimina un obstáculo del sistema de colisiones. */
+  removeObstacle(obstacle: Obstacle): void {
+    const rect = obstacle.getCollisionRect();
+    const index = this.obstacles.findIndex((ob) => ob === rect);
+    if (index !== -1) {
+      this.obstacles.splice(index, 1);
+    }
+  }
+
   /** ¿El rectángulo centrado en (cx, cy) choca con algún obstáculo? */
   isBlocked(cx: number, cy: number, halfWidth: number, halfHeight: number): boolean {
     return this.findBlockingObstacle(cx, cy, halfWidth, halfHeight) !== null;
