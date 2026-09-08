@@ -5,7 +5,7 @@ import { ConnectMenu } from '../src/ui/connectMenu';
 import { installDomMocks, getElement } from './helpers/dom';
 
 import type { SessionHandlers, SessionState } from '../src/network/NetworkSession';
-import type { PeerMessage } from '../src/network/protocol';
+import type { PeerMessage, RoomState } from '../src/network/protocol';
 
 /**
  * Mock de NetworkSession que reproduce el flujo temporal real de
@@ -52,8 +52,20 @@ class MockSession {
     this.status = 'disconnected';
   }
 
+  leave(): void {
+    this.status = 'disconnected';
+  }
+
   send(): boolean {
     return true;
+  }
+
+  getRoomState(): Promise<RoomState> {
+    return Promise.resolve({ version: 1, testValue: '' });
+  }
+
+  onRoomUpdated(_listener: (state: RoomState) => void): () => void {
+    return () => {};
   }
 }
 

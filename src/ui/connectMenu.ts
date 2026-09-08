@@ -1,5 +1,5 @@
 import { NetworkSession, type SessionHandlers, type SessionState } from '../network/NetworkSession';
-import type { PeerMessage } from '../network/protocol';
+import type { PeerMessage, RoomState } from '../network/protocol';
 import { RoomDirectory } from '../storage/roomDirectory';
 
 type StatusLabel = 'desconectado' | 'conectando...' | 'conectado' | 'desconectado (peer)' | 'error';
@@ -23,6 +23,8 @@ export class ConnectMenu {
   private session: NetworkSession | null = null;
   private onMessage: ((message: PeerMessage) => void) | null = null;
   private sessionListeners = new Set<(session: NetworkSession | null) => void>();
+  private roomStateListeners = new Set<(state: RoomState) => void>();
+  private lastRoomState: RoomState | null = null;
   private readonly createSession: (handlers: SessionHandlers) => NetworkSession;
   private currentState: SessionState = 'idle';
 
@@ -88,6 +90,16 @@ export class ConnectMenu {
     return this.session;
   }
 
+  /** Registra un listener que recibe el RoomState cuando cambia. */
+  onRoomStateChange(listener: (state: RoomState) => void): void {
+    this.roomStateListeners.add(listener);
+  }
+
+  /** Devuelve el último RoomState recibido (null si no se ha conectado aún). */
+  getLastRoomState(): RoomState | null {
+    return this.lastRoomState;
+  }
+
   private notifySessionChanged(): void {
     const sessionId = (this.session as { diagId?: number } | null)?.diagId ?? null;
     console.log(
@@ -96,6 +108,13 @@ export class ConnectMenu {
     );
     for (const listener of this.sessionListeners) {
       listener(this.session);
+    }
+  }
+
+  private notifyRoomStateChanged(state: RoomState): void {
+    this.lastRoomState = state;
+    for (const listener of this.roomStateListeners) {
+      listener(state);
     }
   }
 
@@ -117,6 +136,7 @@ export class ConnectMenu {
       this.codeDisplay.hidden = false;
       this.codeInput.disabled = true;
       this.setUIState('connected');
+      await this.fetchInitialState();
       this.notifySessionChanged();
     } catch (error) {
       this.creatingRoom = false;
@@ -149,6 +169,7 @@ export class ConnectMenu {
       this.codeDisplay.hidden = false;
       this.codeInput.disabled = true;
       this.setUIState('connected');
+      await this.fetchInitialState();
       this.notifySessionChanged();
     } catch (error) {
       this.session = null;
@@ -176,6 +197,7 @@ export class ConnectMenu {
       this.codeDisplay.hidden = false;
       this.codeInput.disabled = true;
       this.setUIState('connected');
+      await this.fetchInitialState();
       this.notifySessionChanged();
     } catch (error) {
       // La sala no existe (o no se puede entrar): se propaga el error y NO se
@@ -228,6 +250,7 @@ export class ConnectMenu {
   private handleDisconnect(): void {
     this.session?.close();
     this.session = null;
+    this.lastRoomState = null;
     this.codeDisplay.hidden = true;
     this.codeInput.disabled = false;
     this.codeInput.value = '';
@@ -251,6 +274,18 @@ export class ConnectMenu {
       session.close();
     }
     this.session = null;
+    this.lastRoomState = null;
+  }
+
+  private async fetchInitialState(): Promise<void> {
+    if (!this.session) return;
+    try {
+      const state = await this.session.getRoomState();
+      this.notifyRoomStateChanged(state);
+    } catch {
+      // El estado inicial es best-effort; si falla, las actualizaciones
+      // futuras vía onRoomUpdated seguirán llegando.
+    }
   }
 
   private buildHandlers(): SessionHandlers {
@@ -290,6 +325,9 @@ export class ConnectMenu {
           this.newRoomNameInput.value = '';
           this.renderSavedRooms();
         }
+      },
+      onRoomUpdated: (state) => {
+        this.notifyRoomStateChanged(state);
       },
     };
   }

@@ -9,7 +9,7 @@ import { PlayerSync } from '../network/PlayerSync';
 import { isEditableFocused } from '../../ui/domFocus';
 
 import type { NetworkSession } from '../../network/NetworkSession';
-import type { PeerMessage } from '../../network/protocol';
+import type { PeerMessage, RoomState } from '../../network/protocol';
 
 interface WasdKeys {
   W: Phaser.Input.Keyboard.Key;
@@ -26,6 +26,7 @@ export class RoomScene extends Phaser.Scene {
   private playerSync: PlayerSync | null = null;
   private pendingSession: NetworkSession | null = null;
   private activeSession: NetworkSession | null = null;
+  private roomState: RoomState | null = null;
 
   constructor() {
     super('room');
@@ -105,6 +106,7 @@ export class RoomScene extends Phaser.Scene {
       this.activeSession = session;
     } else {
       this.activeSession = null;
+      this.roomState = null;
     }
 
     this.playerSync?.stop();
@@ -121,6 +123,16 @@ export class RoomScene extends Phaser.Scene {
   /** Reenvía los mensajes P2P de la sesión a la sincronización visual. */
   handleNetworkMessage(message: PeerMessage): void {
     this.playerSync?.onMessage(message);
+  }
+
+  /** Recibe y conserva el RoomState del servidor. RoomScene NO es dueña del estado. */
+  setRoomState(state: RoomState): void {
+    this.roomState = state;
+  }
+
+  /** Devuelve el último RoomState recibido (null si no se ha conectado). */
+  getRoomState(): RoomState | null {
+    return this.roomState;
   }
 
   private startSync(session: NetworkSession): void {

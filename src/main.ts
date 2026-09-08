@@ -4,6 +4,7 @@ import { gameConfig } from './game/config';
 import { RoomScene } from './game/scenes/RoomScene';
 import { ConnectMenu } from './ui/connectMenu';
 import { ChatPanel } from './ui/chatPanel';
+import type { RoomState } from './network/protocol';
 import '../style.css';
 
 const game = new Phaser.Game(gameConfig);
@@ -28,6 +29,10 @@ connectMenu.onSessionChange((session) => {
     chatPanel.unbindSession();
   }
   getRoomScene()?.setNetworkSession(session);
+});
+
+connectMenu.onRoomStateChange((state: RoomState) => {
+  getRoomScene()?.setRoomState(state);
 });
 
 function getRoomScene(): RoomScene | null {
