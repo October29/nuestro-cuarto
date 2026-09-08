@@ -134,6 +134,20 @@ export interface RoomState {
 /** Propiedades de RoomState que el cliente puede modificar vía room:update. */
 export type RoomStatePatch = Pick<RoomState, 'name'>;
 
+/** Patch para actualizar la posición de un objeto existente en la Room.
+ *  No permite modificar id ni type, solo x e y. */
+export interface RoomObjectPositionPatch {
+  /** Identificador del objeto a mover. */
+  objectId: string;
+  /** Nueva posición X del centro del objeto (px). */
+  x: number;
+  /** Nueva posición Y del centro del objeto (px). */
+  y: number;
+}
+
+/** Unión de todos los patches permitidos en room:update. */
+export type RoomUpdatePatch = RoomStatePatch | RoomObjectPositionPatch;
+
 // --- Mensajes de Room State: cliente → servidor ---
 
 export interface SignalingRoomGetStateMessage {
@@ -142,7 +156,7 @@ export interface SignalingRoomGetStateMessage {
 
 export interface SignalingRoomUpdateMessage {
   type: 'room:update';
-  patch: RoomStatePatch;
+  patch: RoomUpdatePatch;
 }
 
 // --- Mensajes de Room State: servidor → cliente ---

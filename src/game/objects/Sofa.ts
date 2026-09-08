@@ -29,6 +29,11 @@ export class Sofa implements Interactable, Obstacle {
     return { x: this.container.x, y: this.container.y };
   }
 
+  /** Actualiza la posición del sofá. Usado al recibir room:updated del servidor. */
+  setPosition(x: number, y: number): void {
+    this.container.setPosition(x, y);
+  }
+
   getCollisionRect(): Phaser.Geom.Rectangle {
     return new Phaser.Geom.Rectangle(
       this.container.x - SOFA_BLOCK_HALF_WIDTH,

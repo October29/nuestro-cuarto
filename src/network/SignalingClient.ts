@@ -4,7 +4,7 @@ import type {
   SignalPayload,
   SignalingErrorMessage,
   RoomState,
-  RoomStatePatch,
+  RoomUpdatePatch,
 } from './protocol';
 
 const DEFAULT_PORT = 8787;
@@ -113,9 +113,9 @@ export class SignalingClient {
   /**
    * Envía una actualización del estado de la Room al servidor.
    * El servidor valida el patch, aplica los cambios permitidos y
-   *Notifica a todos los participantes con room:updated.
+   * notifica a todos los participantes con room:updated.
    */
-  updateRoomState(patch: RoomStatePatch): Promise<RoomState> {
+  updateRoomState(patch: RoomUpdatePatch): Promise<RoomState> {
     return this.exchange({ type: 'room:update', patch }, 'room:updated', 'updateRoomState').then(
       (message) => (message as { type: 'room:updated'; state: RoomState }).state,
     );

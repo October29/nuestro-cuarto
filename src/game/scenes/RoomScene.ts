@@ -37,6 +37,16 @@ export class RoomScene extends Phaser.Scene {
   private roomHeight = ROOM_HEIGHT;
   private roomContainer: Phaser.GameObjects.Container | null = null;
 
+  // Referencia al sofá para actualizar su posición sin recrearlo
+  private sofa: Sofa | null = null;
+
+  // Estado de arrastre del sofá
+  private isDraggingSofa = false;
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private sofaStartX = 0;
+  private sofaStartY = 0;
+
   constructor() {
     super('room');
   }
@@ -66,6 +76,8 @@ export class RoomScene extends Phaser.Scene {
 
     this.interactionSystem = new InteractionSystem(this, this.player, Phaser);
 
+    this.setupSofaDrag();
+
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.interactionSystem.tryInteractFromPointer(pointer)) return;
 
@@ -86,10 +98,76 @@ export class RoomScene extends Phaser.Scene {
     switch (state.type) {
       case 'sofa': {
         const sofa = new Sofa(this, state.x, state.y);
+        this.sofa = sofa;
         collisionSystem.addObstacle(sofa);
         this.interactionSystem.addInteractable(sofa);
         break;
       }
+    }
+  }
+
+  /** Configura el arrastre del sofá con el puntero. */
+  private setupSofaDrag(): void {
+    if (!this.sofa) return;
+
+    const sofaGO = this.sofa.getGameObject();
+    sofaGO.setInteractive({ draggable: true });
+
+    this.input.setDraggable(sofaGO);
+
+    this.input.on('dragstart', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
+      if (gameObject !== sofaGO) return;
+      if (this.isDraggingSofa) return;
+      if (this.interactionSystem.tryInteractFromPointer(pointer)) return;
+
+      this.isDraggingSofa = true;
+      this.dragStartX = pointer.x;
+      this.dragStartY = pointer.y;
+      this.sofaStartX = this.sofa!.getPosition().x;
+      this.sofaStartY = this.sofa!.getPosition().y;
+      // Visual feedback: lift the sofa slightly
+      sofaGO.setDepth(2);
+    });
+
+    this.input.on('drag', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject, _dragX: number, _dragY: number) => {
+      if (gameObject !== sofaGO) return;
+      if (!this.isDraggingSofa) return;
+
+      const worldStart = this.cameras.main.getWorldPoint(this.dragStartX, this.dragStartY);
+      const worldCurrent = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const deltaX = worldCurrent.x - worldStart.x;
+      const deltaY = worldCurrent.y - worldStart.y;
+
+      const newX = this.sofaStartX + deltaX;
+      const newY = this.sofaStartY + deltaY;
+
+      // Actualizar visualmente mientras se arrastra
+      this.sofa!.setPosition(newX, newY);
+    });
+
+    this.input.on('dragend', async (_pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
+      if (gameObject !== sofaGO) return;
+      if (!this.isDraggingSofa) return;
+
+      this.isDraggingSofa = false;
+      sofaGO.setDepth(1);
+
+      // Enviar la nueva posición al servidor
+      const { x, y } = this.sofa!.getPosition();
+      await this.requestObjectPositionUpdate('sofa-1', x, y);
+    });
+  }
+
+  /** Solicita al servidor actualizar la posición de un objeto. */
+  private async requestObjectPositionUpdate(objectId: string, x: number, y: number): Promise<void> {
+    if (!this.activeSession || this.activeSession.state !== 'connected') return;
+
+    const patch = { objectId, x, y };
+    try {
+      await this.activeSession.updateRoomState(patch as any);
+    } catch {
+      // Si falla, el servidor no notificará room:updated y la posición local
+      // se mantendrá. En un caso real podríamos revertir visualmente.
     }
   }
 
@@ -185,6 +263,7 @@ export class RoomScene extends Phaser.Scene {
 
   /** Recibe y conserva el RoomState del servidor. RoomScene NO es dueña del estado. */
   setRoomState(state: RoomState): void {
+    const prevState = this.roomState;
     this.roomState = state;
 
     if (this.roomWidth !== state.width || this.roomHeight !== state.height) {
@@ -193,6 +272,15 @@ export class RoomScene extends Phaser.Scene {
       if (this.scene.isActive()) {
         this.rebuildGeometry();
         this.cameras.main.setBounds(0, 0, this.roomWidth, this.roomHeight);
+      }
+    }
+
+    // Actualizar posición de objetos existentes sin recrearlos
+    if (prevState && this.sofa) {
+      const prevSofa = prevState.objects.find((o) => o.id === 'sofa-1');
+      const newSofa = state.objects.find((o) => o.id === 'sofa-1');
+      if (prevSofa && newSofa && (prevSofa.x !== newSofa.x || prevSofa.y !== newSofa.y)) {
+        this.sofa.setPosition(newSofa.x, newSofa.y);
       }
     }
   }

@@ -1,6 +1,6 @@
 import { SignalingClient } from './SignalingClient';
 import { RtcPeerTransport } from './RtcPeerTransport';
-import type { PeerMessage, RoomState, RoomStatePatch } from './protocol';
+import type { PeerMessage, RoomState, RoomUpdatePatch } from './protocol';
 import type { NetworkTransport, TransportHandlers } from './NetworkTransport';
 
 export type SessionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -172,7 +172,7 @@ export class NetworkSession {
    * aplica el cambio y notifica a todos los participantes con room:updated.
    * Devuelve el RoomState actualizado tras la notificación del servidor.
    */
-  updateRoomState(patch: RoomStatePatch): Promise<RoomState> {
+  updateRoomState(patch: RoomUpdatePatch): Promise<RoomState> {
     return this.signaling.updateRoomState(patch).then((state) => {
       this.handlers.onRoomUpdated?.(state);
       return state;

@@ -198,6 +198,51 @@ export function createSignalingServer(options = {}) {
             return;
           }
           const patch = msg.patch;
+
+          // Distinguir entre patch de nombre y patch de posición de objeto
+          if ('objectId' in patch && 'x' in patch && 'y' in patch) {
+            // Patch de posición de objeto
+            const objectPatch = patch;
+            if (typeof objectPatch.objectId !== 'string' || objectPatch.objectId.length === 0) {
+              send(socket, { type: 'error', message: 'objectId debe ser un string no vacío' });
+              return;
+            }
+            if (typeof objectPatch.x !== 'number' || !Number.isFinite(objectPatch.x)) {
+              send(socket, { type: 'error', message: 'x debe ser un número finito' });
+              return;
+            }
+            if (typeof objectPatch.y !== 'number' || !Number.isFinite(objectPatch.y)) {
+              send(socket, { type: 'error', message: 'y debe ser un número finito' });
+              return;
+            }
+
+            // Buscar el objeto en el estado de la sala
+            const objIndex = room.state.objects.findIndex((obj) => obj.id === objectPatch.objectId);
+            if (objIndex === -1) {
+              send(socket, { type: 'error', message: 'objeto no encontrado' });
+              return;
+            }
+
+            // No permitir cambiar id ni type
+            const obj = room.state.objects[objIndex];
+            if (obj.type !== 'sofa') {
+              send(socket, { type: 'error', message: 'tipo de objeto no soportado' });
+              return;
+            }
+
+            // Actualizar la posición
+            room.state = {
+              ...room.state,
+              objects: room.state.objects.map((o, i) =>
+                i === objIndex ? { ...o, x: objectPatch.x, y: objectPatch.y } : o
+              ),
+            };
+            broadcastToRoom(room, { type: 'room:updated', state: room.state });
+            console.log(`room:update (object position) aceptado en ${room.code}`);
+            return;
+          }
+
+          // Patch de nombre (comportamiento existente)
           // Solo se permite modificar propiedades explícitamente permitidas.
           // Solo aceptamos name como propiedad modificable.
           if ('version' in patch) {
