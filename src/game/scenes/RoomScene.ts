@@ -9,7 +9,12 @@ import { PlayerSync } from '../network/PlayerSync';
 import { isEditableFocused } from '../../ui/domFocus';
 
 import type { NetworkSession } from '../../network/NetworkSession';
-import type { PeerMessage, RoomState } from '../../network/protocol';
+import type { PeerMessage, RoomObjectState, RoomState } from '../../network/protocol';
+
+/** Sofa por defecto: equivalente al que existía antes de Step 6. */
+const DEFAULT_SOFAS: RoomObjectState[] = [
+  { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+];
 
 interface WasdKeys {
   W: Phaser.Input.Keyboard.Key;
@@ -54,11 +59,12 @@ export class RoomScene extends Phaser.Scene {
     this.player = new Player(this, this.roomWidth / 2, this.roomHeight - 110, collisionSystem);
     this.player.setDepth(1);
 
-    const sofa = new Sofa(this, this.roomWidth / 2, this.roomHeight - 230);
-    collisionSystem.addObstacle(sofa);
+    const objects = this.roomState?.objects ?? DEFAULT_SOFAS;
+    for (const obj of objects) {
+      this.createRoomObject(obj, collisionSystem);
+    }
 
     this.interactionSystem = new InteractionSystem(this, this.player, Phaser);
-    this.interactionSystem.addInteractable(sofa);
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.interactionSystem.tryInteractFromPointer(pointer)) return;
@@ -73,6 +79,17 @@ export class RoomScene extends Phaser.Scene {
     if (this.pendingSession) {
       this.startSync(this.pendingSession);
       this.pendingSession = null;
+    }
+  }
+
+  private createRoomObject(state: RoomObjectState, collisionSystem: CollisionSystem): void {
+    switch (state.type) {
+      case 'sofa': {
+        const sofa = new Sofa(this, state.x, state.y);
+        collisionSystem.addObstacle(sofa);
+        this.interactionSystem.addInteractable(sofa);
+        break;
+      }
     }
   }
 

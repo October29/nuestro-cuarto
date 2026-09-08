@@ -14,7 +14,7 @@ import { ConnectMenu } from '../src/ui/connectMenu';
 import { installDomMocks, getElement } from './helpers/dom';
 
 import type { SessionHandlers, SessionState } from '../src/network/NetworkSession';
-import type { RoomState } from '../src/network/protocol';
+import type { RoomState, RoomObjectState } from '../src/network/protocol';
 
 /** Simula el papel de RoomScene: conserva el RoomState recibido. */
 class FakeRoomScene {
@@ -29,10 +29,21 @@ class FakeRoomScene {
   geometryRebuildCount = 0;
   cameraBoundsUpdates = 0;
 
+  // Room objects tracking
+  createdRoomObjects: Array<{ id: string; type: string; x: number; y: number }> = [];
+  mockObstacles: Array<{ x: number; y: number; width: number; height: number }> = [];
+  mockInteractables: Array<{ id: string }> = [];
+
   // Simulated persistent references (survive geometry rebuilds)
   playerRef = { id: 'player-1' };
   interactionSystemRef = { id: 'interaction-1' };
   syncRef: unknown = null;
+
+  constructor(initialState?: RoomState) {
+    if (initialState) {
+      this.roomState = initialState;
+    }
+  }
 
   setRoomState(state: RoomState): void {
     this.roomState = state;
@@ -48,12 +59,36 @@ class FakeRoomScene {
     return this.roomState;
   }
 
-  /** Simulates create(): init persistent systems once, build geometry. */
+  /** Simulates create(): init persistent systems once, build geometry, create room objects. */
   simulateCreate(): void {
     this.playerCreateCount += 1;
     this.interactionSystemCreateCount += 1;
     this.pointerListenerCount += 1;
     this.rebuildGeometry();
+
+    // Create room objects from RoomState (simulates RoomScene.create())
+    if (this.roomState?.objects) {
+      for (const obj of this.roomState.objects) {
+        this.createRoomObject(obj);
+      }
+    }
+  }
+
+  createRoomObject(state: RoomObjectState): void {
+    this.createdRoomObjects.push({ id: state.id, type: state.type, x: state.x, y: state.y });
+    if (state.type === 'sofa') {
+      // Mock obstacle: using the same dimensions as the real Sofa
+      this.mockObstacles.push({ x: state.x, y: state.y, width: 120, height: 60 });
+      this.mockInteractables.push({ id: state.id });
+    }
+  }
+
+  collisionSystemGetAllObstacles(): Array<{ x: number; y: number; width: number; height: number }> {
+    return this.mockObstacles;
+  }
+
+  interactionSystemGetAllInteractables(): Array<{ id: string }> {
+    return this.mockInteractables;
   }
 
   /** Simulates what setRoomState does on dimension change: rebuild geometry only. */
@@ -61,6 +96,7 @@ class FakeRoomScene {
     this.geometryRebuildCount += 1;
     this.cameraBoundsUpdates += 1;
     // Player, InteractionSystem, pointer listener are NOT recreated
+    // Room objects are also NOT recreated
   }
 
   /** Simulates startSync: stores reference to current player. */
@@ -72,7 +108,7 @@ class FakeRoomScene {
 class MockSession {
   public status: SessionState = 'idle';
   public readonly code = 'AB12CD';
-  private roomState: RoomState = { version: 1, name: 'Sala AB12CD', width: 1200, height: 800 };
+  private roomState: RoomState = { version: 1, name: 'Sala AB12CD', width: 1200, height: 800, objects: [] };
   private roomUpdatedListeners: Array<(state: RoomState) => void> = [];
 
   constructor(private readonly handlers: SessionHandlers) {}
@@ -151,15 +187,15 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
 
   it('una RoomScene simulada puede inicializarse con un RoomState válido', () => {
     const scene = new FakeRoomScene();
-    const state: RoomState = { version: 1, name: 'hello', width: 1200, height: 800 };
+    const state: RoomState = { version: 1, name: 'hello', width: 1200, height: 800, objects: [] };
     scene.setRoomState(state);
     assert.deepEqual(scene.getRoomState(), state);
   });
 
   it('la RoomScene simulada conserva el estado recibido', () => {
     const scene = new FakeRoomScene();
-    scene.setRoomState({ version: 1, name: 'first', width: 1200, height: 800 });
-    scene.setRoomState({ version: 1, name: 'second', width: 1200, height: 800 });
+    scene.setRoomState({ version: 1, name: 'first', width: 1200, height: 800, objects: [] });
+    scene.setRoomState({ version: 1, name: 'second', width: 1200, height: 800, objects: [] });
     assert.equal(scene.getRoomState()?.name, 'second');
   });
 
@@ -191,7 +227,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     assert.ok(session);
 
     // Simula que el servidor envía un estado con name específico
-    session.simulateServerUpdate({ version: 1, name: 'server-value', width: 1200, height: 800 });
+    session.simulateServerUpdate({ version: 1, name: 'server-value', width: 1200, height: 800, objects: [] });
 
     assert.equal(scene.getRoomState()?.name, 'server-value');
   });
@@ -215,7 +251,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     assert.equal(received.length, 1, 'debe haber recibido el estado inicial');
 
     // Simula una actualización del servidor
-    session.simulateServerUpdate({ version: 1, name: 'updated', width: 1200, height: 800 });
+    session.simulateServerUpdate({ version: 1, name: 'updated', width: 1200, height: 800, objects: [] });
 
     assert.equal(received.length, 2, 'debe haber recibido la actualización');
     assert.equal(received[1].name, 'updated');
@@ -232,10 +268,10 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     const session = getSession();
     assert.ok(session);
 
-    session.simulateServerUpdate({ version: 1, name: 'first-update', width: 1200, height: 800 });
+    session.simulateServerUpdate({ version: 1, name: 'first-update', width: 1200, height: 800, objects: [] });
     assert.equal(scene.getRoomState()?.name, 'first-update');
 
-    session.simulateServerUpdate({ version: 1, name: 'second-update', width: 1200, height: 800 });
+    session.simulateServerUpdate({ version: 1, name: 'second-update', width: 1200, height: 800, objects: [] });
     assert.equal(scene.getRoomState()?.name, 'second-update');
   });
 
@@ -265,7 +301,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
   it('la escena no escribe directamente en RoomState', () => {
     // Verificación: la escena solo lee el estado, no lo muta
     const scene = new FakeRoomScene();
-    const state: RoomState = { version: 1, name: 'original', width: 1200, height: 800 };
+    const state: RoomState = { version: 1, name: 'original', width: 1200, height: 800, objects: [] };
     scene.setRoomState(state);
 
     // La escena conserva la referencia; no la muta
@@ -287,7 +323,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     assert.ok(session);
 
     // Simula una actualización antes de desconectar
-    session.simulateServerUpdate({ version: 1, name: 'before-disconnect', width: 1200, height: 800 });
+    session.simulateServerUpdate({ version: 1, name: 'before-disconnect', width: 1200, height: 800, objects: [] });
     assert.equal(scene.getRoomState()?.name, 'before-disconnect');
 
     // Desconectar
@@ -313,7 +349,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
 
   it('la escena consume width y height desde RoomState para su geometría', () => {
     const scene = new FakeRoomScene();
-    const state: RoomState = { version: 1, name: 'test', width: 1200, height: 800 };
+    const state: RoomState = { version: 1, name: 'test', width: 1200, height: 800, objects: [] };
     scene.setRoomState(state);
 
     assert.equal(scene.roomWidth, 1200, 'roomWidth debe coincidir con state.width');
@@ -327,7 +363,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     assert.equal(scene.roomHeight, 600, 'roomHeight inicial es el default de Phaser (600)');
 
     // Al recibir RoomState, las dimensiones cambian a las del servidor
-    scene.setRoomState({ version: 1, name: 'test', width: 1200, height: 800 });
+    scene.setRoomState({ version: 1, name: 'test', width: 1200, height: 800, objects: [] });
     assert.equal(scene.roomWidth, 1200);
     assert.equal(scene.roomHeight, 800);
   });
@@ -339,7 +375,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     const buildsBefore = scene.geometryRebuildCount;
     const cameraBefore = scene.cameraBoundsUpdates;
 
-    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900, objects: [] });
 
     assert.equal(scene.geometryRebuildCount, buildsBefore + 1, 'debe reconstruir geometría');
     assert.equal(scene.cameraBoundsUpdates, cameraBefore + 1, 'debe actualizar límites de cámara');
@@ -354,7 +390,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     const playersBefore = scene.playerCreateCount;
 
     // Dimension change triggers geometry rebuild, NOT player recreation
-    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900, objects: [] });
 
     assert.equal(scene.playerCreateCount, playersBefore,
       'el Player no debe recrearse por un cambio de dimensiones');
@@ -366,7 +402,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
 
     const listenersBefore = scene.pointerListenerCount;
 
-    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900, objects: [] });
 
     assert.equal(scene.pointerListenerCount, listenersBefore,
       'el listener de pointerdown no debe duplicarse');
@@ -379,7 +415,7 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
 
     const syncBefore = scene.syncRef;
 
-    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900, objects: [] });
 
     assert.equal(scene.syncRef, syncBefore,
       'PlayerSync debe seguir apuntando al mismo Player');
@@ -391,9 +427,102 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
 
     const systemsBefore = scene.interactionSystemCreateCount;
 
-    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900, objects: [] });
 
     assert.equal(scene.interactionSystemCreateCount, systemsBefore,
       'InteractionSystem no debe recrearse');
+  });
+});
+
+describe('Room objects: Step 6 - Sofa in RoomState', () => {
+  function createSceneWithObjects(objects: any[] = []): FakeRoomScene {
+    return new FakeRoomScene({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects,
+    });
+  }
+
+  it('initial RoomState contains sofa objects', () => {
+    const scene = createSceneWithObjects([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    const state = scene.getRoomState();
+    assert.ok(state);
+    assert.equal(state!.objects.length, 1);
+    assert.equal(state!.objects[0].type, 'sofa');
+    assert.equal(state!.objects[0].id, 'sofa-1');
+  });
+
+  it('RoomScene creates Sofa from RoomState objects', () => {
+    const scene = createSceneWithObjects([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    assert.equal(scene.createdRoomObjects.length, 1);
+    assert.equal(scene.createdRoomObjects[0].type, 'sofa');
+    assert.equal(scene.createdRoomObjects[0].x, 600);
+    assert.equal(scene.createdRoomObjects[0].y, 570);
+  });
+
+  it('Sofa is registered as obstacle with CollisionSystem', () => {
+    const scene = createSceneWithObjects([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    const obstacles = scene.collisionSystemGetAllObstacles();
+    assert.ok(obstacles.length >= 1);
+    const sofaObstacle = obstacles.find(o => o.x === 600 && o.y === 570);
+    assert.ok(sofaObstacle);
+  });
+
+  it('Sofa is registered as interactable', () => {
+    const scene = createSceneWithObjects([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    const interactables = scene.interactionSystemGetAllInteractables();
+    assert.ok(interactables.length >= 1);
+  });
+
+  it('RoomStatePatch does not allow modifying objects', () => {
+    const scene = createSceneWithObjects([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    const stateBefore = scene.getRoomState();
+    assert.ok(stateBefore);
+    assert.equal(stateBefore!.objects.length, 1);
+
+    // Simulate server broadcasting full updated state (name changed, objects preserved)
+    scene.setRoomState({
+      version: 1,
+      name: 'Updated Name',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 600, y: 570 }],
+    });
+    const stateAfter = scene.getRoomState();
+    assert.ok(stateAfter);
+    assert.equal(stateAfter!.objects.length, 1);
+    assert.equal(stateAfter!.objects[0].x, 600);
+  });
+
+  it('multiple sofas can be created from RoomState', () => {
+    const scene = createSceneWithObjects([
+      { id: 'sofa-1', type: 'sofa', x: 200, y: 300 },
+      { id: 'sofa-2', type: 'sofa', x: 800, y: 400 },
+    ]);
+    scene.simulateCreate();
+
+    assert.equal(scene.createdRoomObjects.length, 2);
+    assert.equal(scene.createdRoomObjects[0].x, 200);
+    assert.equal(scene.createdRoomObjects[1].x, 800);
   });
 });

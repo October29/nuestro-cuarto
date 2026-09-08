@@ -79,6 +79,26 @@ export type ServerSignalingMessage =
 // --- Room State ---
 
 /**
+ * Representación mínima de un objeto persistente dentro de una Room.
+ *
+ * Cada objeto tiene un id estable (para poder referenciarlo en el futuro),
+ * un type que determina la factory Phaser en el cliente, y posición (x, y).
+ *
+ * RoomObjectState es el estado AUTORITATIVO: el dato que vive en el servidor.
+ * La representación visual (Sofa, etc.) se crea a partir de estos datos.
+ */
+export interface RoomObjectState {
+  /** Identificador estable del objeto. Generado por el servidor. */
+  id: string;
+  /** Tipo del objeto. Determina qué factory Phaser crear. */
+  type: 'sofa';
+  /** Posición X del centro del objeto en la sala (px). */
+  x: number;
+  /** Posición Y del centro del objeto en la sala (px). */
+  y: number;
+}
+
+/**
  * Estado compartido de una Room. Vive en el servidor y se consulta vía signaling.
  *
  * RoomState es el estado AUTORITATIVO de la sala. Todos los participantes
@@ -103,6 +123,12 @@ export interface RoomState {
   width: number;
   /** Alto de la sala en píxeles. Dimensión autoritativa del servidor. */
   height: number;
+  /**
+   * Objetos persistentes de la sala (muebles, etc.).
+   * Se crean una vez y no cambian en este paso. En el futuro se podrán
+   * agregar, mover o eliminar mediante un editor.
+   */
+  objects: RoomObjectState[];
 }
 
 /** Propiedades de RoomState que el cliente puede modificar vía room:update. */
