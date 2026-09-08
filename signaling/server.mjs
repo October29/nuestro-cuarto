@@ -63,6 +63,7 @@ export function createSignalingServer(options = {}) {
       height: 800,
       objects: [
         { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+        { id: 'table-1', type: 'table', x: 900, y: 400 },
       ],
     };
   }

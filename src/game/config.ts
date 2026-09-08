@@ -18,6 +18,12 @@ export const SOFA_BLOCK_HALF_HEIGHT = 30;
 // Hueco del punto de salida del sofá, medido desde el borde inferior del bloque.
 export const SOFA_EXIT_GAP = 40;
 
+// Espacio físico (área bloqueante) de la mesa, independiente de su dibujo.
+export const TABLE_BLOCK_HALF_WIDTH = 50;
+export const TABLE_BLOCK_HALF_HEIGHT = 35;
+// Hueco del punto de salida de la mesa (si se interacciona con ella).
+export const TABLE_EXIT_GAP = 30;
+
 // Sincronización de estado del jugador: un envío cada ~100 ms (10 Hz).
 export const PLAYER_STATE_INTERVAL_MS = 100;
 

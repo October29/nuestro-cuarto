@@ -85,13 +85,13 @@ export type ServerSignalingMessage =
  * un type que determina la factory Phaser en el cliente, y posición (x, y).
  *
  * RoomObjectState es el estado AUTORITATIVO: el dato que vive en el servidor.
- * La representación visual (Sofa, etc.) se crea a partir de estos datos.
+ * La representación visual (Sofa, Table, etc.) se crea a partir de estos datos.
  */
 export interface RoomObjectState {
   /** Identificador estable del objeto. Generado por el servidor. */
   id: string;
   /** Tipo del objeto. Determina qué factory Phaser crear. */
-  type: 'sofa';
+  type: 'sofa' | 'table';
   /** Posición X del centro del objeto en la sala (px). */
   x: number;
   /** Posición Y del centro del objeto en la sala (px). */

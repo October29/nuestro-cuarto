@@ -3,6 +3,7 @@ import Phaser from 'phaser';
 import { ROOM_HEIGHT, ROOM_WIDTH } from '../config';
 import { Player, PlayerInput } from '../entities/Player';
 import { Sofa } from '../objects/Sofa';
+import { Table } from '../objects/Table';
 import { CollisionSystem } from '../physics/CollisionSystem';
 import { InteractionSystem } from '../systems/InteractionSystem';
 import { PlayerSync } from '../network/PlayerSync';
@@ -11,9 +12,21 @@ import { isEditableFocused } from '../../ui/domFocus';
 import type { NetworkSession } from '../../network/NetworkSession';
 import type { PeerMessage, RoomObjectState, RoomState } from '../../network/protocol';
 
-/** Sofa por defecto: equivalente al que existía antes de Step 6. */
-const DEFAULT_SOFAS: RoomObjectState[] = [
+/** Interfaz común para objetos de habitación persistentes. */
+interface RoomObject {
+  getGameObject(): Phaser.GameObjects.Container;
+  getPosition(): { x: number; y: number };
+  setPosition(x: number, y: number): void;
+  getCollisionRect(): Phaser.Geom.Rectangle;
+  getActionLabel(): string;
+  getExitPoint(): { x: number; y: number };
+  onInteract(actor: import('../objects/InteractionActor').InteractionActor): void;
+}
+
+/** Objetos por defecto: sofá y mesa. */
+const DEFAULT_OBJECTS: RoomObjectState[] = [
   { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+  { id: 'table-1', type: 'table', x: 900, y: 400 },
 ];
 
 interface WasdKeys {
@@ -38,7 +51,7 @@ export class RoomScene extends Phaser.Scene {
   private roomContainer: Phaser.GameObjects.Container | null = null;
 
   // Colección de objetos persistentes indexados por su RoomObjectState.id
-  private roomObjects = new Map<string, Sofa>();
+  private roomObjects = new Map<string, RoomObject>();
 
   // Estado de arrastre del objeto que se está moviendo
   private isDraggingObject = false;
@@ -70,7 +83,7 @@ export class RoomScene extends Phaser.Scene {
     this.player = new Player(this, this.roomWidth / 2, this.roomHeight - 110, collisionSystem);
     this.player.setDepth(1);
 
-    const objects = this.roomState?.objects ?? DEFAULT_SOFAS;
+    const objects = this.roomState?.objects ?? DEFAULT_OBJECTS;
     for (const obj of objects) {
       this.createRoomObject(obj, collisionSystem);
     }
@@ -99,15 +112,26 @@ export class RoomScene extends Phaser.Scene {
   }
 
   private createRoomObject(state: RoomObjectState, collisionSystem: CollisionSystem): void {
+    let obj: RoomObject;
+
     switch (state.type) {
       case 'sofa': {
-        const sofa = new Sofa(this, state.x, state.y);
-        this.roomObjects.set(state.id, sofa);
-        collisionSystem.addObstacle(sofa);
-        this.interactionSystem.addInteractable(sofa);
+        obj = new Sofa(this, state.x, state.y);
         break;
       }
+      case 'table': {
+        obj = new Table(this, state.x, state.y);
+        break;
+      }
+      default: {
+        // No implementado: tipo desconocido, no hacer nada
+        return;
+      }
     }
+
+    this.roomObjects.set(state.id, obj);
+    collisionSystem.addObstacle(obj);
+    this.interactionSystem.addInteractable(obj);
   }
 
   /** Configura el arrastre del objeto con el puntero. */
