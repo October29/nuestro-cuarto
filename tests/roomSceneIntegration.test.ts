@@ -30,7 +30,7 @@ class FakeRoomScene {
 class MockSession {
   public status: SessionState = 'idle';
   public readonly code = 'AB12CD';
-  private roomState: RoomState = { version: 1, testValue: '' };
+  private roomState: RoomState = { version: 1, name: 'Sala AB12CD' };
   private roomUpdatedListeners: Array<(state: RoomState) => void> = [];
 
   constructor(private readonly handlers: SessionHandlers) {}
@@ -109,16 +109,16 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
 
   it('una RoomScene simulada puede inicializarse con un RoomState válido', () => {
     const scene = new FakeRoomScene();
-    const state: RoomState = { version: 1, testValue: 'hello' };
+    const state: RoomState = { version: 1, name: 'hello' };
     scene.setRoomState(state);
     assert.deepEqual(scene.getRoomState(), state);
   });
 
   it('la RoomScene simulada conserva el estado recibido', () => {
     const scene = new FakeRoomScene();
-    scene.setRoomState({ version: 1, testValue: 'first' });
-    scene.setRoomState({ version: 1, testValue: 'second' });
-    assert.equal(scene.getRoomState()?.testValue, 'second');
+    scene.setRoomState({ version: 1, name: 'first' });
+    scene.setRoomState({ version: 1, name: 'second' });
+    assert.equal(scene.getRoomState()?.name, 'second');
   });
 
   it('ConnectMenu notifica el estado inicial de la Room', async () => {
@@ -135,10 +135,10 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     // El estado inicial debe haber llegado
     assert.ok(scene.getRoomState(), 'la escena debe tener un estado');
     assert.equal(scene.getRoomState()!.version, 1);
-    assert.equal(scene.getRoomState()!.testValue, '');
+    assert.ok(scene.getRoomState()!.name.startsWith('Sala '), 'name debe comenzar con "Sala "');
   });
 
-  it('testValue recibido por la escena coincide con el estado del servidor', async () => {
+  it('name recibido por la escena coincide con el estado del servidor', async () => {
     const { menu, getSession } = buildConnectMenu();
     const scene = new FakeRoomScene();
 
@@ -148,10 +148,10 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     const session = getSession();
     assert.ok(session);
 
-    // Simula que el servidor envía un estado con testValue específico
-    session.simulateServerUpdate({ version: 1, testValue: 'server-value' });
+    // Simula que el servidor envía un estado con name específico
+    session.simulateServerUpdate({ version: 1, name: 'server-value' });
 
-    assert.equal(scene.getRoomState()?.testValue, 'server-value');
+    assert.equal(scene.getRoomState()?.name, 'server-value');
   });
 
   it('al actualizar RoomState desde NetworkSession, la escena recibe onRoomUpdated', async () => {
@@ -173,11 +173,11 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     assert.equal(received.length, 1, 'debe haber recibido el estado inicial');
 
     // Simula una actualización del servidor
-    session.simulateServerUpdate({ version: 1, testValue: 'updated' });
+    session.simulateServerUpdate({ version: 1, name: 'updated' });
 
     assert.equal(received.length, 2, 'debe haber recibido la actualización');
-    assert.equal(received[1].testValue, 'updated');
-    assert.equal(scene.getRoomState()?.testValue, 'updated');
+    assert.equal(received[1].name, 'updated');
+    assert.equal(scene.getRoomState()?.name, 'updated');
   });
 
   it('un segundo estado reemplaza correctamente el estado anterior', async () => {
@@ -190,11 +190,11 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     const session = getSession();
     assert.ok(session);
 
-    session.simulateServerUpdate({ version: 1, testValue: 'first-update' });
-    assert.equal(scene.getRoomState()?.testValue, 'first-update');
+    session.simulateServerUpdate({ version: 1, name: 'first-update' });
+    assert.equal(scene.getRoomState()?.name, 'first-update');
 
-    session.simulateServerUpdate({ version: 1, testValue: 'second-update' });
-    assert.equal(scene.getRoomState()?.testValue, 'second-update');
+    session.simulateServerUpdate({ version: 1, name: 'second-update' });
+    assert.equal(scene.getRoomState()?.name, 'second-update');
   });
 
   it('la escena no necesita WebRTC para recibir su estado inicial', async () => {
@@ -223,15 +223,15 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
   it('la escena no escribe directamente en RoomState', () => {
     // Verificación: la escena solo lee el estado, no lo muta
     const scene = new FakeRoomScene();
-    const state: RoomState = { version: 1, testValue: 'original' };
+    const state: RoomState = { version: 1, name: 'original' };
     scene.setRoomState(state);
 
     // La escena conserva la referencia; no la muta
     const stored = scene.getRoomState();
-    assert.equal(stored?.testValue, 'original');
+    assert.equal(stored?.name, 'original');
 
     // El objeto original no fue modificado
-    assert.equal(state.testValue, 'original');
+    assert.equal(state.name, 'original');
   });
 
   it('al desconectar, la escena conserva su último estado conocido', async () => {
@@ -245,14 +245,14 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     assert.ok(session);
 
     // Simula una actualización antes de desconectar
-    session.simulateServerUpdate({ version: 1, testValue: 'before-disconnect' });
-    assert.equal(scene.getRoomState()?.testValue, 'before-disconnect');
+    session.simulateServerUpdate({ version: 1, name: 'before-disconnect' });
+    assert.equal(scene.getRoomState()?.name, 'before-disconnect');
 
     // Desconectar
     (menu as { handleDisconnect(): void }).handleDisconnect();
 
     // La escena conserva el último estado conocido
-    assert.equal(scene.getRoomState()?.testValue, 'before-disconnect',
+    assert.equal(scene.getRoomState()?.name, 'before-disconnect',
       'la escena conserva el último estado conocido tras disconnect');
   });
 

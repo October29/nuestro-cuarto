@@ -91,7 +91,7 @@ describe('Room State: el servidor mantiene y sirve el estado de la Room', () => 
     const state = await session.getRoomState();
 
     assert.equal(state.version, 1);
-    assert.equal(state.testValue, '', 'testValue debe comenzar como string vacío');
+    assert.ok(state.name.startsWith('Sala '), 'name debe comenzar con "Sala "');
 
     await session.close();
   });
@@ -222,14 +222,14 @@ describe('Room State: el servidor mantiene y sirve el estado de la Room', () => 
 });
 
 describe('Room State Step 2: WRITE + BROADCAST', () => {
-  test('una Room recién creada tiene testValue vacío', async () => {
+  test('una Room recién creada tiene name con el formato "Sala <code>"', async () => {
     const s = await withServer();
     const { session } = makeSession(s);
 
     await session.createRoom();
     const state = await session.getRoomState();
 
-    assert.equal(state.testValue, '', 'testValue debe comenzar como string vacío');
+    assert.ok(state.name.startsWith('Sala '), 'name debe comenzar con "Sala "');
 
     await session.close();
   });
@@ -239,10 +239,10 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     const { session } = makeSession(s);
 
     await session.createRoom();
-    const updated = await session.updateRoomState({ testValue: 'hello' });
+    const updated = await session.updateRoomState({ name: 'Mi Sala' });
 
     assert.equal(updated.version, 1, 'version no debe cambiar');
-    assert.equal(updated.testValue, 'hello', 'testValue debe actualizarse');
+    assert.equal(updated.name, 'Mi Sala', 'name debe actualizarse');
 
     await session.close();
   });
@@ -252,10 +252,10 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     const { session } = makeSession(s);
 
     await session.createRoom();
-    await session.updateRoomState({ testValue: 'changed' });
+    await session.updateRoomState({ name: 'Cambiado' });
     const state = await session.getRoomState();
 
-    assert.equal(state.testValue, 'changed', 'getRoomState debe reflejar el update');
+    assert.equal(state.name, 'Cambiado', 'getRoomState debe reflejar el update');
 
     await session.close();
   });
@@ -270,7 +270,7 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     const created = (await client.next()) as { type: string; roomCode: string };
 
     // Enviar update con una propiedad no permitida
-    client.send({ type: 'room:update', patch: { testValue: 'ok', evil: 'hack' } });
+    client.send({ type: 'room:update', patch: { name: 'ok', evil: 'hack' } });
     const response = (await client.next()) as { type: string; message?: string };
 
     assert.equal(response.type, 'error');
@@ -287,7 +287,7 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     client.send({ type: 'create' });
     await client.next();
 
-    client.send({ type: 'room:update', patch: { testValue: 'ok', version: 2 } });
+    client.send({ type: 'room:update', patch: { name: 'ok', version: 2 } });
     const response = (await client.next()) as { type: string; message?: string };
 
     assert.equal(response.type, 'error');
@@ -304,14 +304,14 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     const code = await creator.session.createRoom();
     await joiner.session.joinRoom(code);
 
-    await creator.session.updateRoomState({ testValue: 'server-side-check' });
+    await creator.session.updateRoomState({ name: 'Verificación servidor' });
 
     // Ambos deben ver el cambio
     const stateA = await creator.session.getRoomState();
     const stateB = await joiner.session.getRoomState();
 
-    assert.equal(stateA.testValue, 'server-side-check');
-    assert.equal(stateB.testValue, 'server-side-check');
+    assert.equal(stateA.name, 'Verificación servidor');
+    assert.equal(stateB.name, 'Verificación servidor');
 
     await joiner.session.close();
     await creator.session.close();
@@ -334,10 +334,10 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     });
 
     await session.createRoom();
-    await session.updateRoomState({ testValue: 'from-me' });
+    await session.updateRoomState({ name: 'Mío' });
 
     assert.ok(receivedState, 'debe recibir room:updated');
-    assert.equal(receivedState!.testValue, 'from-me');
+    assert.equal(receivedState!.name, 'Mío');
 
     await session.close();
   });
@@ -373,14 +373,14 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     await joiner.joinRoom(code);
 
     // Creator actualiza
-    await creator.updateRoomState({ testValue: 'broadcast-test' });
+    await creator.updateRoomState({ name: 'Broadcast' });
 
     // Esperar a que el joiner procese el broadcast (async WebSocket)
     await waitFor(() => receivedByB !== null);
 
     // El joiner debe recibir la notificación
     assert.ok(receivedByB, 'el otro participante debe recibir room:updated');
-    assert.equal(receivedByB!.testValue, 'broadcast-test');
+    assert.equal(receivedByB!.name, 'Broadcast');
 
     await joiner.close();
     await creator.close();
@@ -394,7 +394,7 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     const code = await creator.session.createRoom();
     await joiner.session.joinRoom(code);
 
-    await creator.session.updateRoomState({ testValue: 'sync-check' });
+    await creator.session.updateRoomState({ name: 'Sync' });
 
     const stateA = await creator.session.getRoomState();
     const stateB = await joiner.session.getRoomState();
@@ -413,7 +413,7 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     const code = await creator.session.createRoom();
     await first.session.joinRoom(code);
 
-    await creator.session.updateRoomState({ testValue: 'persistent-state' });
+    await creator.session.updateRoomState({ name: 'Persistente' });
 
     // El primero se va
     first.session.leave();
@@ -424,7 +424,7 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     await third.session.joinRoom(code);
     const state = await third.session.getRoomState();
 
-    assert.equal(state.testValue, 'persistent-state', 'el tercero debe ver el estado actualizado');
+    assert.equal(state.name, 'Persistente', 'el tercero debe ver el estado actualizado');
 
     await third.session.close();
     await creator.session.close();
@@ -438,7 +438,7 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     const code = await creator.session.createRoom();
     await joiner.session.joinRoom(code);
 
-    await creator.session.updateRoomState({ testValue: 'survives-leave' });
+    await creator.session.updateRoomState({ name: 'Sobrevive' });
 
     // Ambos se van
     creator.session.leave();
@@ -451,7 +451,7 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     await latecomer.session.joinRoom(code);
     const state = await latecomer.session.getRoomState();
 
-    assert.equal(state.testValue, 'survives-leave', 'el estado debe persistir tras leave de todos');
+    assert.equal(state.name, 'Sobrevive', 'el estado debe persistir tras leave de todos');
 
     await latecomer.session.close();
   });
@@ -461,7 +461,7 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     const client = new WsTestClient(s.url);
     await client.open();
 
-    client.send({ type: 'room:update', patch: { testValue: 'no-room' } });
+    client.send({ type: 'room:update', patch: { name: 'no-room' } });
     const response = (await client.next()) as { type: string; message?: string };
 
     assert.equal(response.type, 'error');
@@ -488,7 +488,7 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
 
     // Verificar que el estado no cambió
     const state = await creator.session.getRoomState();
-    assert.equal(state.testValue, '', 'el estado no debe haber cambiado');
+    assert.ok(state.name.startsWith('Sala '), 'el estado no debe haber cambiado');
 
     await client.close();
     await creator.session.close();
@@ -499,9 +499,9 @@ describe('Room State Step 2: WRITE + BROADCAST', () => {
     const { session } = makeSession(s);
 
     await session.createRoom();
-    const updated = await session.updateRoomState({ testValue: 'no-webrtc' });
+    const updated = await session.updateRoomState({ name: 'Sin WebRTC' });
 
-    assert.equal(updated.testValue, 'no-webrtc', 'room:update funciona sin WebRTC');
+    assert.equal(updated.name, 'Sin WebRTC', 'room:update funciona sin WebRTC');
 
     await session.close();
   });

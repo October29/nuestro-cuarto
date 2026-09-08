@@ -78,16 +78,31 @@ export type ServerSignalingMessage =
 
 // --- Room State ---
 
-/** Estado persistente de una Room. Vive en el servidor y se consulta vía signaling. */
+/**
+ * Estado compartido de una Room. Vive en el servidor y se consulta vía signaling.
+ *
+ * RoomState es el estado AUTORITATIVO de la sala. Todos los participantes
+ * ven el mismo estado. El servidor es la única fuente de verdad.
+ *
+ *RoomDirectory (nombre local del usuario) es un concepto distinto:
+ * sirve para que cada usuario organice sus salas en la agenda personal.
+ * RoomState.name es el nombre real de la Room para todos los participantes.
+ */
 export interface RoomState {
   /** Versión del contrato de RoomState. Incremental, no implica migración automática. */
   version: 1;
-  /** Campo experimental para validar el mecanismo de escritura. Será reemplazado. */
-  testValue: string;
+  /**
+   * Nombre de la Room. Compartido por todos los participantes.
+   * - Creador: puede establecerlo al crear la sala.
+   - Cualquier participante: puede modificarlo vía room:update.
+   * - Valor inicial: "Sala <roomCode>".
+   * - Persiste mientras la Room viva en el servidor.
+   */
+  name: string;
 }
 
 /** Propiedades de RoomState que el cliente puede modificar vía room:update. */
-export type RoomStatePatch = Pick<RoomState, 'testValue'>;
+export type RoomStatePatch = Pick<RoomState, 'name'>;
 
 // --- Mensajes de Room State: cliente → servidor ---
 

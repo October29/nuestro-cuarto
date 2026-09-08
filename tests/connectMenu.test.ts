@@ -61,7 +61,7 @@ class MockSession {
   }
 
   getRoomState(): Promise<RoomState> {
-    return Promise.resolve({ version: 1, testValue: '' });
+    return Promise.resolve({ version: 1, name: 'Sala AB12CD' });
   }
 
   onRoomUpdated(_listener: (state: RoomState) => void): () => void {

@@ -55,8 +55,8 @@ export function createSignalingServer(options = {}) {
   }
 
   /** Estado inicial de una Room recién creada. */
-  function createInitialState() {
-    return { version: 1, testValue: '' };
+  function createInitialState(roomCode) {
+    return { version: 1, name: `Sala ${roomCode}` };
   }
 
   function send(socket, data) {
@@ -122,7 +122,7 @@ export function createSignalingServer(options = {}) {
         case 'create': {
           if (socket.roomCode) return;
           const roomCode = generateCode(new Set(rooms.keys()));
-          rooms.set(roomCode, { code: roomCode, createdAt: Date.now(), sockets: [], state: createInitialState() });
+          rooms.set(roomCode, { code: roomCode, createdAt: Date.now(), sockets: [], state: createInitialState(roomCode) });
           addPresence(roomCode, socket);
           send(socket, { type: 'created', roomCode });
           console.log(`sala creada: ${roomCode}`);
@@ -191,23 +191,23 @@ export function createSignalingServer(options = {}) {
           }
           const patch = msg.patch;
           // Solo se permite modificar propiedades explícitamente permitidas.
-          // Solo aceptamos testValue como propiedad modificable.
+          // Solo aceptamos name como propiedad modificable.
           if ('version' in patch) {
             send(socket, { type: 'error', message: 'no puedes modificar version' });
             return;
           }
-          const allowedKeys = new Set(['testValue']);
+          const allowedKeys = new Set(['name']);
           for (const key of Object.keys(patch)) {
             if (!allowedKeys.has(key)) {
               send(socket, { type: 'error', message: `propiedad no permitida: ${key}` });
               return;
             }
           }
-          if (typeof patch.testValue !== 'string') {
-            send(socket, { type: 'error', message: 'testValue debe ser un string' });
+          if (typeof patch.name !== 'string' || patch.name.trim().length === 0) {
+            send(socket, { type: 'error', message: 'name debe ser un string no vacío' });
             return;
           }
-          room.state = { ...room.state, testValue: patch.testValue };
+          room.state = { ...room.state, name: patch.name.trim() };
           broadcastToRoom(room, { type: 'room:updated', state: room.state });
           console.log(`room:update aceptado en ${room.code}`);
           break;
