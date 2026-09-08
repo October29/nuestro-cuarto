@@ -7,6 +7,7 @@ import { Interactable } from './Interactable';
 
 export class Sofa implements Interactable, Obstacle {
   private container: Phaser.GameObjects.Container;
+  private collisionRect: Phaser.Geom.Rectangle;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     const width = 120;
@@ -19,6 +20,13 @@ export class Sofa implements Interactable, Obstacle {
 
     this.container = scene.add.container(x, y, [back, seat, leftArm, rightArm]);
     this.container.setSize(width, height);
+
+    this.collisionRect = new Phaser.Geom.Rectangle(
+      x - SOFA_BLOCK_HALF_WIDTH,
+      y - SOFA_BLOCK_HALF_HEIGHT,
+      SOFA_BLOCK_HALF_WIDTH * 2,
+      SOFA_BLOCK_HALF_HEIGHT * 2,
+    );
   }
 
   getGameObject(): Phaser.GameObjects.Container {
@@ -32,15 +40,14 @@ export class Sofa implements Interactable, Obstacle {
   /** Actualiza la posición del sofá. Usado al recibir room:updated del servidor. */
   setPosition(x: number, y: number): void {
     this.container.setPosition(x, y);
+    this.collisionRect.setPosition(
+      x - SOFA_BLOCK_HALF_WIDTH,
+      y - SOFA_BLOCK_HALF_HEIGHT,
+    );
   }
 
   getCollisionRect(): Phaser.Geom.Rectangle {
-    return new Phaser.Geom.Rectangle(
-      this.container.x - SOFA_BLOCK_HALF_WIDTH,
-      this.container.y - SOFA_BLOCK_HALF_HEIGHT,
-      SOFA_BLOCK_HALF_WIDTH * 2,
-      SOFA_BLOCK_HALF_HEIGHT * 2,
-    );
+    return this.collisionRect;
   }
 
   getActionLabel(): string {

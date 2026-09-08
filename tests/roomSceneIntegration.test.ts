@@ -77,9 +77,22 @@ class FakeRoomScene {
   createRoomObject(state: RoomObjectState): void {
     this.createdRoomObjects.push({ id: state.id, type: state.type, x: state.x, y: state.y });
     if (state.type === 'sofa') {
-      // Mock obstacle: using the same dimensions as the real Sofa
-      this.mockObstacles.push({ x: state.x, y: state.y, width: 120, height: 60 });
+      // Mock obstacle: collision rect position (like real Sofa.collisionRect)
+      // collisionRect is at (x - SOFA_BLOCK_HALF_WIDTH, y - SOFA_BLOCK_HALF_HEIGHT)
+      const obstacle = { x: state.x - 60, y: state.y - 30, width: 120, height: 60 };
+      this.mockObstacles.push(obstacle);
       this.mockInteractables.push({ id: state.id });
+      // Keep a reference for position updates
+      (this as any)[`obstacle_${state.id}`] = obstacle;
+    }
+  }
+
+  /** Update obstacle position (simulates Sofa.setPosition updating collisionRect) */
+  updateObstaclePosition(id: string, x: number, y: number): void {
+    const obstacle = (this as any)[`obstacle_${id}`];
+    if (obstacle) {
+      obstacle.x = x - 60; // SOFA_BLOCK_HALF_WIDTH
+      obstacle.y = y - 30; // SOFA_BLOCK_HALF_HEIGHT
     }
   }
 
@@ -476,7 +489,8 @@ describe('Room objects: Step 6 - Sofa in RoomState', () => {
 
     const obstacles = scene.collisionSystemGetAllObstacles();
     assert.ok(obstacles.length >= 1);
-    const sofaObstacle = obstacles.find(o => o.x === 600 && o.y === 570);
+    // collisionRect is at (x - 60, y - 30) = (540, 540)
+    const sofaObstacle = obstacles.find(o => o.x === 540 && o.y === 540);
     assert.ok(sofaObstacle);
   });
 
@@ -673,5 +687,111 @@ describe('Room object position sync: Step 8', () => {
     assert.equal(scene.playerRef, playerRefBefore);
     assert.equal(scene.interactionSystemRef, interactionRefBefore);
     assert.equal(scene.syncRef, syncRefBefore);
+  });
+});
+
+describe('Sofa collision sync: fix for moving collider', () => {
+  function createSceneWithSofa(x = 600, y = 570): FakeRoomScene {
+    return new FakeRoomScene({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x, y }],
+    });
+  }
+
+  it('collider rectangle updates when sofa position changes', () => {
+    const scene = createSceneWithSofa(600, 570);
+    scene.simulateCreate();
+
+    // Get initial obstacle position (center of sofa)
+    const obstaclesBefore = scene.collisionSystemGetAllObstacles();
+    const sofaObstacleBefore = obstaclesBefore.find(o => o.x === 540 && o.y === 540);
+    assert.ok(sofaObstacleBefore, 'initial obstacle should exist at expected position');
+
+    // Simulate server sending updated position
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    // Update the mock obstacle position (simulates Sofa.setPosition updating collisionRect)
+    scene.updateObstaclePosition('sofa-1', 700, 600);
+
+    // Get updated obstacle position
+    const obstaclesAfter = scene.collisionSystemGetAllObstacles();
+    const sofaObstacleAfter = obstaclesAfter.find(o => o.x === 640 && o.y === 570);
+    assert.ok(sofaObstacleAfter, 'obstacle should move to new position');
+    assert.equal(sofaObstacleAfter.x, 640); // 700 - 60
+    assert.equal(sofaObstacleAfter.y, 570); // 600 - 30
+  });
+
+  it('CollisionSystem sees sofa at new position after position update', () => {
+    const scene = createSceneWithSofa(600, 570);
+    scene.simulateCreate();
+
+    // Initial collision check at old position
+    const oldPos = { x: 600, y: 570 };
+    const obstaclesBefore = scene.collisionSystemGetAllObstacles();
+    assert.ok(obstaclesBefore.length > 0);
+
+    // Update position
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 800, y: 500 }],
+    });
+    scene.updateObstaclePosition('sofa-1', 800, 500);
+
+    // The same obstacle reference should now be at the new position
+    const obstaclesAfter = scene.collisionSystemGetAllObstacles();
+    const sofaObstacle = obstaclesAfter.find(o => o.x === 740 && o.y === 470);
+    assert.ok(sofaObstacle, 'collision system should see sofa at new position');
+  });
+
+  it('no second sofa or obstacle created on position update', () => {
+    const scene = createSceneWithSofa(600, 570);
+    scene.simulateCreate();
+
+    const initialObjects = scene.createdRoomObjects.length;
+    const initialObstacles = scene.collisionSystemGetAllObstacles().length;
+
+    // Update position multiple times
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+    scene.updateObstaclePosition('sofa-1', 700, 600);
+
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 800, y: 500 }],
+    });
+    scene.updateObstaclePosition('sofa-1', 800, 500);
+
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 400, y: 400 }],
+    });
+    scene.updateObstaclePosition('sofa-1', 400, 400);
+
+    // No new objects or obstacles created
+    assert.equal(scene.createdRoomObjects.length, initialObjects);
+    assert.equal(scene.collisionSystemGetAllObstacles().length, initialObstacles);
   });
 });
