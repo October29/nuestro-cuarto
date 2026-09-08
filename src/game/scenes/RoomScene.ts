@@ -31,8 +31,6 @@ export class RoomScene extends Phaser.Scene {
   private roomWidth = ROOM_WIDTH;
   private roomHeight = ROOM_HEIGHT;
   private roomContainer: Phaser.GameObjects.Container | null = null;
-  private sofa: Sofa | null = null;
-  private collisionSystem: CollisionSystem | null = null;
 
   constructor() {
     super('room');
@@ -49,7 +47,28 @@ export class RoomScene extends Phaser.Scene {
       this.roomHeight = this.roomState.height;
     }
 
-    this.buildRoom();
+    const collisionSystem = new CollisionSystem();
+
+    this.rebuildGeometry();
+
+    this.player = new Player(this, this.roomWidth / 2, this.roomHeight - 110, collisionSystem);
+    this.player.setDepth(1);
+
+    const sofa = new Sofa(this, this.roomWidth / 2, this.roomHeight - 230);
+    collisionSystem.addObstacle(sofa);
+
+    this.interactionSystem = new InteractionSystem(this, this.player, Phaser);
+    this.interactionSystem.addInteractable(sofa);
+
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.interactionSystem.tryInteractFromPointer(pointer)) return;
+
+      const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      this.player.moveToPoint(world.x, world.y);
+    });
+
+    this.cameras.main.setBounds(0, 0, this.roomWidth, this.roomHeight);
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
     if (this.pendingSession) {
       this.startSync(this.pendingSession);
@@ -57,10 +76,8 @@ export class RoomScene extends Phaser.Scene {
     }
   }
 
-  private buildRoom(): void {
+  private rebuildGeometry(): void {
     this.roomContainer?.destroy();
-
-    this.collisionSystem = new CollisionSystem();
 
     this.roomContainer = this.add.container(0, 0);
 
@@ -87,25 +104,6 @@ export class RoomScene extends Phaser.Scene {
         })
         .setOrigin(0.5),
     );
-
-    this.player = new Player(this, this.roomWidth / 2, this.roomHeight - 110, this.collisionSystem);
-    this.player.setDepth(1);
-
-    this.sofa = new Sofa(this, this.roomWidth / 2, this.roomHeight - 230);
-    this.collisionSystem.addObstacle(this.sofa);
-
-    this.interactionSystem = new InteractionSystem(this, this.player, Phaser);
-    this.interactionSystem.addInteractable(this.sofa);
-
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.interactionSystem.tryInteractFromPointer(pointer)) return;
-
-      const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-      this.player.moveToPoint(world.x, world.y);
-    });
-
-    this.cameras.main.setBounds(0, 0, this.roomWidth, this.roomHeight);
-    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
   }
 
   private buildWindow(x: number, y: number): Phaser.GameObjects.GameObject[] {
@@ -176,7 +174,8 @@ export class RoomScene extends Phaser.Scene {
       this.roomWidth = state.width;
       this.roomHeight = state.height;
       if (this.scene.isActive()) {
-        this.buildRoom();
+        this.rebuildGeometry();
+        this.cameras.main.setBounds(0, 0, this.roomWidth, this.roomHeight);
       }
     }
   }

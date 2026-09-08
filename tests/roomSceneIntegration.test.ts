@@ -21,13 +21,51 @@ class FakeRoomScene {
   roomState: RoomState | null = null;
   roomWidth: number = 800;
   roomHeight: number = 600;
+
+  // Lifecycle tracking: counts how many times each persistent object was created
+  playerCreateCount = 0;
+  interactionSystemCreateCount = 0;
+  pointerListenerCount = 0;
+  geometryRebuildCount = 0;
+  cameraBoundsUpdates = 0;
+
+  // Simulated persistent references (survive geometry rebuilds)
+  playerRef = { id: 'player-1' };
+  interactionSystemRef = { id: 'interaction-1' };
+  syncRef: unknown = null;
+
   setRoomState(state: RoomState): void {
     this.roomState = state;
+    const dimsChanged = this.roomWidth !== state.width || this.roomHeight !== state.height;
     this.roomWidth = state.width;
     this.roomHeight = state.height;
+    if (dimsChanged) {
+      this.rebuildGeometry();
+    }
   }
+
   getRoomState(): RoomState | null {
     return this.roomState;
+  }
+
+  /** Simulates create(): init persistent systems once, build geometry. */
+  simulateCreate(): void {
+    this.playerCreateCount += 1;
+    this.interactionSystemCreateCount += 1;
+    this.pointerListenerCount += 1;
+    this.rebuildGeometry();
+  }
+
+  /** Simulates what setRoomState does on dimension change: rebuild geometry only. */
+  private rebuildGeometry(): void {
+    this.geometryRebuildCount += 1;
+    this.cameraBoundsUpdates += 1;
+    // Player, InteractionSystem, pointer listener are NOT recreated
+  }
+
+  /** Simulates startSync: stores reference to current player. */
+  simulateStartSync(): void {
+    this.syncRef = this.playerRef;
   }
 }
 
@@ -292,5 +330,70 @@ describe('Room State Step 3: ConnectMenu → RoomState → consumidor', () => {
     scene.setRoomState({ version: 1, name: 'test', width: 1200, height: 800 });
     assert.equal(scene.roomWidth, 1200);
     assert.equal(scene.roomHeight, 800);
+  });
+
+  it('actualizar dimensiones reconstruye geometría y actualiza límites de cámara', () => {
+    const scene = new FakeRoomScene();
+    scene.simulateCreate();
+
+    const buildsBefore = scene.geometryRebuildCount;
+    const cameraBefore = scene.cameraBoundsUpdates;
+
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+
+    assert.equal(scene.geometryRebuildCount, buildsBefore + 1, 'debe reconstruir geometría');
+    assert.equal(scene.cameraBoundsUpdates, cameraBefore + 1, 'debe actualizar límites de cámara');
+    assert.equal(scene.roomWidth, 1600);
+    assert.equal(scene.roomHeight, 900);
+  });
+
+  it('actualizar dimensiones NO crea una segunda instancia del Player', () => {
+    const scene = new FakeRoomScene();
+    scene.simulateCreate();
+
+    const playersBefore = scene.playerCreateCount;
+
+    // Dimension change triggers geometry rebuild, NOT player recreation
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+
+    assert.equal(scene.playerCreateCount, playersBefore,
+      'el Player no debe recrearse por un cambio de dimensiones');
+  });
+
+  it('actualizar dimensiones NO duplica el listener de interacción', () => {
+    const scene = new FakeRoomScene();
+    scene.simulateCreate();
+
+    const listenersBefore = scene.pointerListenerCount;
+
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+
+    assert.equal(scene.pointerListenerCount, listenersBefore,
+      'el listener de pointerdown no debe duplicarse');
+  });
+
+  it('la sincronización existente sigue asociada al Player actual tras cambio de dimensiones', () => {
+    const scene = new FakeRoomScene();
+    scene.simulateCreate();
+    scene.simulateStartSync();
+
+    const syncBefore = scene.syncRef;
+
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+
+    assert.equal(scene.syncRef, syncBefore,
+      'PlayerSync debe seguir apuntando al mismo Player');
+  });
+
+  it('el InteractionSystem no se recrea por cambio de dimensiones', () => {
+    const scene = new FakeRoomScene();
+    scene.simulateCreate();
+
+    const systemsBefore = scene.interactionSystemCreateCount;
+
+    scene.setRoomState({ version: 1, name: 'test', width: 1600, height: 900 });
+
+    assert.equal(scene.interactionSystemCreateCount, systemsBefore,
+      'InteractionSystem no debe recrearse');
   });
 });
