@@ -46,12 +46,30 @@ class FakeRoomScene {
   }
 
   setRoomState(state: RoomState): void {
+    const prevState = this.roomState;
     this.roomState = state;
     const dimsChanged = this.roomWidth !== state.width || this.roomHeight !== state.height;
     this.roomWidth = state.width;
     this.roomHeight = state.height;
     if (dimsChanged) {
       this.rebuildGeometry();
+    }
+
+    // Update position of existing objects in the mock (simulates real RoomScene)
+    if (prevState) {
+      for (const newObj of state.objects) {
+        const prevObj = prevState.objects.find((o) => o.id === newObj.id);
+        if (prevObj && (prevObj.x !== newObj.x || prevObj.y !== newObj.y)) {
+          // Update createdRoomObjects
+          const createdObj = this.createdRoomObjects.find(o => o.id === newObj.id);
+          if (createdObj) {
+            createdObj.x = newObj.x;
+            createdObj.y = newObj.y;
+          }
+          // Update mock obstacle
+          this.updateObstaclePosition(newObj.id, newObj.x, newObj.y);
+        }
+      }
     }
   }
 
@@ -793,5 +811,162 @@ describe('Sofa collision sync: fix for moving collider', () => {
     // No new objects or obstacles created
     assert.equal(scene.createdRoomObjects.length, initialObjects);
     assert.equal(scene.collisionSystemGetAllObstacles().length, initialObstacles);
+  });
+});
+
+describe('Room objects by ID: Step 9 - collection indexed by id', () => {
+  function createSceneWithMultipleObjects(objects: RoomObjectState[]): FakeRoomScene {
+    return new FakeRoomScene({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects,
+    });
+  }
+
+  it('FakeRoomScene creates multiple objects with different IDs', () => {
+    const scene = createSceneWithMultipleObjects([
+      { id: 'sofa-1', type: 'sofa', x: 200, y: 300 },
+      { id: 'sofa-2', type: 'sofa', x: 600, y: 570 },
+      { id: 'sofa-3', type: 'sofa', x: 1000, y: 400 },
+    ]);
+    scene.simulateCreate();
+
+    assert.equal(scene.createdRoomObjects.length, 3);
+    const ids = scene.createdRoomObjects.map(o => o.id).sort();
+    assert.deepEqual(ids, ['sofa-1', 'sofa-2', 'sofa-3']);
+    // Each has its own obstacle
+    assert.equal(scene.collisionSystemGetAllObstacles().length, 3);
+  });
+
+  it('setRoomState updates existing object by ID, not by array index', () => {
+    const scene = createSceneWithMultipleObjects([
+      { id: 'sofa-A', type: 'sofa', x: 100, y: 100 },
+      { id: 'sofa-B', type: 'sofa', x: 500, y: 500 },
+    ]);
+    scene.simulateCreate();
+
+    // Verify initial positions
+    assert.equal(scene.createdRoomObjects.find(o => o.id === 'sofa-A')!.x, 100);
+    assert.equal(scene.createdRoomObjects.find(o => o.id === 'sofa-B')!.x, 500);
+
+    // Update only sofa-B position via setRoomState
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [
+        { id: 'sofa-A', type: 'sofa', x: 100, y: 100 }, // unchanged
+        { id: 'sofa-B', type: 'sofa', x: 800, y: 600 }, // moved
+      ],
+    });
+
+    // sofa-A should be unchanged
+    const objA = scene.createdRoomObjects.find(o => o.id === 'sofa-A')!;
+    assert.equal(objA.x, 100);
+    assert.equal(objA.y, 100);
+
+    // sofa-B should be updated
+    const objB = scene.createdRoomObjects.find(o => o.id === 'sofa-B')!;
+    assert.equal(objB.x, 800);
+    assert.equal(objB.y, 600);
+  });
+
+  it('no new objects created when setRoomState updates positions', () => {
+    const scene = createSceneWithMultipleObjects([
+      { id: 'sofa-1', type: 'sofa', x: 200, y: 300 },
+      { id: 'sofa-2', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    const initialObjects = scene.createdRoomObjects.length;
+    const initialObstacles = scene.collisionSystemGetAllObstacles().length;
+
+    // Multiple position updates
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [
+        { id: 'sofa-1', type: 'sofa', x: 250, y: 350 },
+        { id: 'sofa-2', type: 'sofa', x: 700, y: 600 },
+      ],
+    });
+
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [
+        { id: 'sofa-1', type: 'sofa', x: 300, y: 400 },
+        { id: 'sofa-2', type: 'sofa', x: 800, y: 500 },
+      ],
+    });
+
+    // No new objects or obstacles
+    assert.equal(scene.createdRoomObjects.length, initialObjects);
+    assert.equal(scene.collisionSystemGetAllObstacles().length, initialObstacles);
+  });
+
+  it('dragging one sofa does not affect other objects', () => {
+    const scene = createSceneWithMultipleObjects([
+      { id: 'sofa-1', type: 'sofa', x: 200, y: 300 },
+      { id: 'sofa-2', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    // Simulate drag of sofa-1 to new position
+    const pos1 = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    const pos2 = scene.createdRoomObjects.find(o => o.id === 'sofa-2')!;
+
+    // Update only sofa-1 position
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [
+        { id: 'sofa-1', type: 'sofa', x: 400, y: 500 }, // moved
+        { id: 'sofa-2', type: 'sofa', x: 600, y: 570 }, // unchanged
+      ],
+    });
+
+    // sofa-1 updated
+    const updated1 = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    assert.equal(updated1.x, 400);
+    assert.equal(updated1.y, 500);
+
+    // sofa-2 unchanged
+    const updated2 = scene.createdRoomObjects.find(o => o.id === 'sofa-2')!;
+    assert.equal(updated2.x, 600);
+    assert.equal(updated2.y, 570);
+  });
+
+  it('sofa drag and sync still works with Map-based collection', () => {
+    const scene = createSceneWithMultipleObjects([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    // Verify sofa-1 exists and is in collection
+    assert.ok(scene.createdRoomObjects.find(o => o.id === 'sofa-1'));
+
+    // Simulate drag + server update
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    // Position updated
+    const updated = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    assert.equal(updated.x, 700);
+    assert.equal(updated.y, 600);
   });
 });
