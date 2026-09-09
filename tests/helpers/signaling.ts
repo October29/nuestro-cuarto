@@ -10,11 +10,14 @@ export interface TestSignalingServer {
   close: () => Promise<void>;
 }
 
-export async function startTestSignaling(): Promise<TestSignalingServer> {
+export async function startTestSignaling(options?: { env?: Record<string, string> }): Promise<TestSignalingServer> {
   // Puerto 0: el SO asigna un puerto libre, evitando colisiones entre los
   // múltiples servidores que arrancan en paralelo (los tests se ejecutan
   // concurrentemente). El puerto real se lee una vez que escucha.
-  const server = createSignalingServer({ port: 0 });
+  const server = createSignalingServer({ 
+    port: 0,
+    env: options?.env ? { ...process.env, ...options.env } : process.env
+  });
   const port = await new Promise<number>((resolve, reject) => {
     server.wss.on('listening', () => {
       const address = server.wss.address();

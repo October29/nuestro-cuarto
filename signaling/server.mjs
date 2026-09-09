@@ -1,6 +1,8 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const PORT = Number(process.env.SIGNALING_PORT ?? process.env.PORT ?? 8787);
 const CODE_LENGTH = 6;
@@ -8,6 +10,97 @@ const CODE_LENGTH = 6;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_PARTICIPANTS = 2;
 
+// Directorio de datos para persistencia (configurable via variable de entorno).
+function getDataDir(env) {
+  return env.SIGNALING_DATA_DIR ?? path.join(process.cwd(), 'data', 'rooms');
+}
+
+// ---------------------------------------------------------------------------
+// Persistencia de RoomState en disco.
+
+/** Asegura que el directorio de datos exista. */
+function ensureDataDir(env) {
+  const dir = getDataDir(env);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+/** Ruta del archivo de persistencia para una sala. */
+function roomFilePath(roomCode, env) {
+  return path.join(getDataDir(env), `${roomCode}.json`);
+}
+
+/** Valida que un estado tenga la forma esperada de RoomState. */
+function validateRoomState(state) {
+  if (!state || typeof state !== 'object') return false;
+  if (typeof state.version !== 'number') return false;
+  if (typeof state.name !== 'string') return false;
+  if (typeof state.width !== 'number') return false;
+  if (typeof state.height !== 'number') return false;
+  if (!Array.isArray(state.objects)) return false;
+  for (const obj of state.objects) {
+    if (!obj || typeof obj !== 'object') return false;
+    if (typeof obj.id !== 'string' || obj.id.length === 0) return false;
+    if (obj.type !== 'sofa' && obj.type !== 'table') return false;
+    if (typeof obj.x !== 'number' || !Number.isFinite(obj.x)) return false;
+    if (typeof obj.y !== 'number' || !Number.isFinite(obj.y)) return false;
+  }
+  return true;
+}
+
+/** Carga todas las salas persistidas desde el disco. */
+function loadPersistedRooms(env) {
+  ensureDataDir(env);
+  const rooms = new Map();
+  try {
+    const files = fs.readdirSync(getDataDir(env));
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      const roomCode = file.slice(0, -5);
+      const filePath = roomFilePath(roomCode, env);
+      try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const state = JSON.parse(content);
+        if (!validateRoomState(state)) {
+          console.warn(`Estado inválido en ${file}, ignorando`);
+          continue;
+        }
+        rooms.set(roomCode, {
+          code: roomCode,
+          createdAt: Date.now(),
+          sockets: [],
+          state,
+        });
+        console.log(`Sala persistida cargada: ${roomCode}`);
+      } catch (e) {
+        console.warn(`Error al cargar ${file}: ${e.message}`);
+      }
+    }
+  } catch (e) {
+    console.warn(`Error al leer directorio de datos: ${e.message}`);
+  }
+  return rooms;
+}
+
+/** Escribe el estado de una sala en disco de forma atómica. */
+function persistRoomState(roomCode, state, env) {
+  ensureDataDir(env);
+  const filePath = roomFilePath(roomCode, env);
+  const tempPath = `${filePath}.tmp`;
+  try {
+    const content = JSON.stringify(state, null, 2);
+    fs.writeFileSync(tempPath, content, 'utf8');
+    fs.renameSync(tempPath, filePath);
+  } catch (e) {
+    // Limpieza en caso de error
+    try {
+      fs.unlinkSync(tempPath);
+    } catch (_) {}
+    throw e;
+  }
+}
+ 
 // ---------------------------------------------------------------------------
 // Room-first (Paso 1): ROOM != CONNECTION.
 //
@@ -39,8 +132,8 @@ const MAX_PARTICIPANTS = 2;
 // ---------------------------------------------------------------------------
 
 export function createSignalingServer(options = {}) {
-  const { port = PORT } = options;
-  const rooms = new Map();
+  const { port = PORT, env = process.env } = options;
+  const rooms = loadPersistedRooms(env);
   const connected = new Set();
 
   const wss = new WebSocketServer({ port });
@@ -131,7 +224,9 @@ export function createSignalingServer(options = {}) {
         case 'create': {
           if (socket.roomCode) return;
           const roomCode = generateCode(new Set(rooms.keys()));
-          rooms.set(roomCode, { code: roomCode, createdAt: Date.now(), sockets: [], state: createInitialState(roomCode) });
+          const initialState = createInitialState(roomCode);
+          rooms.set(roomCode, { code: roomCode, createdAt: Date.now(), sockets: [], state: initialState });
+          persistRoomState(roomCode, initialState, env);
           addPresence(roomCode, socket);
           send(socket, { type: 'created', roomCode });
           console.log(`sala creada: ${roomCode}`);
@@ -233,6 +328,7 @@ export function createSignalingServer(options = {}) {
               objects: [...room.state.objects, { id: createPatch.id, type: createPatch.type, x: createPatch.x, y: createPatch.y }],
             };
             broadcastToRoom(room, { type: 'room:updated', state: room.state });
+            persistRoomState(room.code, room.state, env);
             console.log(`room:update (create object) aceptado en ${room.code}`);
             return;
           }
@@ -258,6 +354,7 @@ export function createSignalingServer(options = {}) {
               objects: room.state.objects.filter((o) => o.id !== removePatch.objectId),
             };
             broadcastToRoom(room, { type: 'room:updated', state: room.state });
+            persistRoomState(room.code, room.state, env);
             console.log(`room:update (remove object) aceptado en ${room.code}`);
             return;
           }
@@ -301,6 +398,7 @@ export function createSignalingServer(options = {}) {
               ),
             };
             broadcastToRoom(room, { type: 'room:updated', state: room.state });
+            persistRoomState(room.code, room.state, env);
             console.log(`room:update (object position) aceptado en ${room.code}`);
             return;
           }
@@ -335,10 +433,11 @@ export function createSignalingServer(options = {}) {
             send(socket, { type: 'error', message: 'name debe ser un string no vacío' });
             return;
           }
-          room.state = { ...room.state, name: patch.name.trim() };
-          broadcastToRoom(room, { type: 'room:updated', state: room.state });
-          console.log(`room:update aceptado en ${room.code}`);
-          break;
+room.state = { ...room.state, name: patch.name.trim() };
+            broadcastToRoom(room, { type: 'room:updated', state: room.state });
+            persistRoomState(room.code, room.state, env);
+            console.log(`room:update aceptado en ${room.code}`);
+            break;
         }
 
         default:
