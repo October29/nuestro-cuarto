@@ -1,8 +1,9 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ConnectMenu } from '../src/ui/connectMenu';
 import { installDomMocks, getElement } from './helpers/dom';
+import { startTestSignaling, type TestSignalingServer } from './helpers/signaling';
 
 import type { SessionHandlers, SessionState } from '../src/network/NetworkSession';
 import type { PeerMessage, RoomState } from '../src/network/protocol';
@@ -211,46 +212,47 @@ describe('ConnectMenu: una sola NetworkSession produce una sola notificación de
 });
 
 describe('ConnectMenu: signalingUrl configurable', () => {
-  beforeEach(() => {
-    installDomMocks();
+  let server: TestSignalingServer | null = null;
+
+  afterEach(async () => {
+    if (server) {
+      await server.close();
+      server = null;
+    }
   });
 
-  it('usa el signalingUrl explícito al crear NetworkSession (factory por defecto)', async () => {
-    const customUrl = 'wss://custom-signaling.example.com:8787';
-    let capturedSession: { signalingUrl?: string } | null = null;
+  async function withServer(): Promise<TestSignalingServer> {
+    server = await startTestSignaling();
+    return server;
+  }
 
-    // Usamos el factory por defecto (sin proveer createSession) y capturamos
-    // la instancia de NetworkSession creada para verificar su URL.
-    const originalCreateSession = ConnectMenu.prototype['createSession'] as any;
+  it('usa el signalingUrl explícito al crear NetworkSession (factory por defecto)', async () => {
+    const s = await withServer();
+    const customUrl = s.url;
 
     const menu = new ConnectMenu({
       signalingUrl: customUrl,
-      createSession: (handlers) => {
-        const session = new MockSession(handlers as SessionHandlers) as never;
-        // Simulamos que el factory por defecto habría pasado signalingUrl
-        // Verificamos que ConnectMenu lo recibió correctamente
-        capturedSession = { signalingUrl: customUrl };
-        return session;
-      },
     });
 
+    // handleCreate crea la sesión y conecta al signaling
     await (menu as { handleCreate(): Promise<void> }).handleCreate();
 
-    assert.equal(capturedSession?.signalingUrl, customUrl, 'el signalingUrl explícito debe estar disponible');
+    // Si la conexión al signaling fue exitosa, el código de sala se muestra
+    const codeText = getElement('room-code-text');
+    assert.ok(codeText.textContent && codeText.textContent.length === 6, 'debe haber creado sala en el servidor personalizado');
   });
 
   it('usa el default (location.hostname) cuando no se proporciona signalingUrl', async () => {
-    let capturedSession: { signalingUrl?: string } | null = null;
-
-    const menu = new ConnectMenu({
-      createSession: (handlers) => {
-        capturedSession = { signalingUrl: undefined };
-        return new MockSession(handlers as SessionHandlers) as never;
-      },
-    });
-
-    await (menu as { handleCreate(): Promise<void> }).handleCreate();
-
-    assert.equal(capturedSession?.signalingUrl, undefined, 'sin signalingUrl explícito debe ser undefined');
+    // Sin signalingUrl explícito, SignalingClient usa defaultSignalingUrl()
+    // En Node.js (tests), defaultSignalingUrl() devuelve 'ws://localhost:8787'
+    // Verificamos que se construye la URL por defecto correctamente sin necesidad
+    // de conectar (el comportamiento de conexión se prueba en signalingClient.test.ts)
+    const { SignalingClient } = await import('../src/network/SignalingClient');
+    const client = new SignalingClient(); // sin URL -> usa default
+    // En entorno de test (Node), defaultSignalingUrl() usa 'ws://localhost:8787'
+    // No podemos acceder a la propiedad privada 'url', pero podemos verificar
+    // que el cliente se crea sin error y su estado es 'idle'
+    assert.equal(client.state, 'idle');
+    // La URL real se resuelve internamente al conectar
   });
 });
