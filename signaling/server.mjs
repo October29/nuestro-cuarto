@@ -226,7 +226,7 @@ export function createSignalingServer(options = {}) {
 
             // No permitir cambiar id ni type
             const obj = room.state.objects[objIndex];
-            if (obj.type !== 'sofa') {
+            if (obj.type !== 'sofa' && obj.type !== 'table') {
               send(socket, { type: 'error', message: 'tipo de objeto no soportado' });
               return;
             }

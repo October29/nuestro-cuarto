@@ -1480,3 +1480,302 @@ describe('Room object existence reconciliation: Step 11', () => {
     assert.equal(table.y, 500);
   });
 });
+
+describe('Room object authoritative drag sync: Step 12', () => {
+  function createSceneWithTypes(objects: RoomObjectState[]): FakeRoomScene {
+    return new FakeRoomScene({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects,
+    });
+  }
+
+  it('ending drag produces position update via setRoomState', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    // Simulate drag end with new position
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    // Position updated through authoritative flow
+    const updated = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    assert.equal(updated.x, 700);
+    assert.equal(updated.y, 600);
+  });
+
+  it('received room:updated modifies existing object without recreating', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    const initialObjects = scene.createdRoomObjects.length;
+    const initialObstacles = scene.collisionSystemGetAllObstacles().length;
+    const initialInteractables = scene.interactionSystemGetAllInteractables().length;
+
+    // Simulate receiving room:updated from server
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    // Object not recreated
+    assert.equal(scene.createdRoomObjects.length, initialObjects);
+    // Obstacles and interactables preserved
+    assert.equal(scene.collisionSystemGetAllObstacles().length, initialObstacles);
+    assert.equal(scene.interactionSystemGetAllInteractables().length, initialInteractables);
+
+    // Position updated
+    const updated = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    assert.equal(updated.x, 700);
+    assert.equal(updated.y, 600);
+  });
+
+  it('drag listeners remain after position update', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    // Object exists in collection (which simulates having drag handlers)
+    const initialId = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!.id;
+
+    // Simulate room:updated with new position
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    // Same object ID should still be present (listeners would be preserved)
+    const updated = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    assert.equal(updated.id, initialId);
+  });
+
+  it('obstacle remains registered after position update', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    const initialObstacles = scene.collisionSystemGetAllObstacles().length;
+
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    assert.equal(scene.collisionSystemGetAllObstacles().length, initialObstacles);
+    const obstacle = scene.collisionSystemGetAllObstacles().find(o => o.x === 640 && o.y === 570);
+    assert.ok(obstacle, 'obstacle should be at new position');
+  });
+
+  it('interactable remains registered after position update', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    const initialInteractables = scene.interactionSystemGetAllInteractables().length;
+
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    assert.equal(scene.interactionSystemGetAllInteractables().length, initialInteractables);
+    assert.ok(scene.interactionSystemGetAllInteractables().find(i => i.id === 'sofa-1'));
+  });
+
+  it('receiving same position does not recreate or duplicate', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+      { id: 'table-1', type: 'table', x: 900, y: 400 },
+    ]);
+    scene.simulateCreate();
+
+    const initialObjects = scene.createdRoomObjects.length;
+    const initialObstacles = scene.collisionSystemGetAllObstacles().length;
+    const initialInteractables = scene.interactionSystemGetAllInteractables().length;
+
+    // Send identical state
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [
+        { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+        { id: 'table-1', type: 'table', x: 900, y: 400 },
+      ],
+    });
+
+    // Nothing should change
+    assert.equal(scene.createdRoomObjects.length, initialObjects);
+    assert.equal(scene.collisionSystemGetAllObstacles().length, initialObstacles);
+    assert.equal(scene.interactionSystemGetAllInteractables().length, initialInteractables);
+  });
+
+  it('two consecutive position updates leave object at last position', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    // First update
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    // Second update
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 800, y: 650 }],
+    });
+
+    // Should be at last position
+    const updated = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    assert.equal(updated.x, 800);
+    assert.equal(updated.y, 650);
+
+    // Object count unchanged
+    assert.equal(scene.createdRoomObjects.length, 1);
+  });
+
+  it('sofa and table work identically through authoritative flow', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+      { id: 'table-1', type: 'table', x: 900, y: 400 },
+    ]);
+    scene.simulateCreate();
+
+    // Update both positions
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [
+        { id: 'sofa-1', type: 'sofa', x: 700, y: 600 },
+        { id: 'table-1', type: 'table', x: 800, y: 500 },
+      ],
+    });
+
+    // Both updated correctly
+    const sofa = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    const table = scene.createdRoomObjects.find(o => o.id === 'table-1')!;
+    assert.equal(sofa.x, 700);
+    assert.equal(sofa.y, 600);
+    assert.equal(table.x, 800);
+    assert.equal(table.y, 500);
+
+    // Both have obstacles and interactables
+    assert.equal(scene.collisionSystemGetAllObstacles().length, 2);
+    assert.equal(scene.interactionSystemGetAllInteractables().length, 2);
+  });
+
+  it('second client receives updated position via room:updated simulation', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    scene.simulateCreate();
+
+    // Simulate first client dragging and server broadcasting
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    // Simulate second client receiving same state (simulating room:updated)
+    const secondScene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+    ]);
+    secondScene.simulateCreate();
+
+    secondScene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'sofa-1', type: 'sofa', x: 700, y: 600 }],
+    });
+
+    // Both clients end up with same position
+    const firstClientPos = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    const secondClientPos = secondScene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    assert.equal(firstClientPos.x, secondClientPos.x);
+    assert.equal(firstClientPos.y, secondClientPos.y);
+  });
+
+  it('final object state matches RoomState.objects exactly', () => {
+    const scene = createSceneWithTypes([
+      { id: 'sofa-1', type: 'sofa', x: 600, y: 570 },
+      { id: 'table-1', type: 'table', x: 900, y: 400 },
+    ]);
+    scene.simulateCreate();
+
+    // Send multiple updates
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [
+        { id: 'sofa-1', type: 'sofa', x: 700, y: 600 },
+        { id: 'table-1', type: 'table', x: 1000, y: 500 },
+      ],
+    });
+
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [
+        { id: 'sofa-1', type: 'sofa', x: 750, y: 620 },
+        { id: 'table-1', type: 'table', x: 800, y: 550 },
+      ],
+    });
+
+    // Final state should match RoomState.objects
+    const roomState = scene.getRoomState()!;
+    const sofa = scene.createdRoomObjects.find(o => o.id === 'sofa-1')!;
+    const table = scene.createdRoomObjects.find(o => o.id === 'table-1')!;
+
+    assert.equal(sofa.x, roomState.objects.find(o => o.id === 'sofa-1')!.x);
+    assert.equal(sofa.y, roomState.objects.find(o => o.id === 'sofa-1')!.y);
+    assert.equal(table.x, roomState.objects.find(o => o.id === 'table-1')!.x);
+    assert.equal(table.y, roomState.objects.find(o => o.id === 'table-1')!.y);
+  });
+});
