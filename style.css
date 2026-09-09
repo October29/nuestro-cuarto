@@ -145,7 +145,53 @@
   font-size: 12px;
 }
 
+#room-edit-panel {
+  pointer-events: auto;
+  background: rgba(24, 34, 56, 0.92);
+  border: 1px solid #3d4a72;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #d8deff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+}
+
+#room-edit-toggle-btn {
+  background: transparent;
+  border: 1px solid #4a5a8a;
+  color: #ffd98a;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+#room-edit-toggle-btn:hover {
+  background: #4a5a8a;
+}
+
+#room-edit-toggle-btn.active {
+  background: #4a5a8a;
+  color: #fff;
+}
+
 #room-name-panel {
+  pointer-events: auto;
+  background: rgba(24, 34, 56, 0.92);
+  border: 1px solid #3d4a72;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #d8deff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+}
+
+#room-edit-panel {
   pointer-events: auto;
   background: rgba(24, 34, 56, 0.92);
   border: 1px solid #3d4a72;

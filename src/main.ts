@@ -5,6 +5,7 @@ import { RoomScene } from './game/scenes/RoomScene';
 import { ConnectMenu } from './ui/connectMenu';
 import { ChatPanel } from './ui/chatPanel';
 import { RoomNamePanel } from './ui/roomNamePanel';
+import { RoomEditPanel } from './ui/roomEditPanel';
 import type { RoomState } from './network/protocol';
 import '../style.css';
 
@@ -12,6 +13,7 @@ const game = new Phaser.Game(gameConfig);
 
 const chatPanel = new ChatPanel();
 const roomNamePanel = new RoomNamePanel();
+const roomEditPanel = new RoomEditPanel();
 const connectMenu = new ConnectMenu();
 
 connectMenu.setMessageCallback((message) => {
@@ -42,5 +44,10 @@ connectMenu.onRoomStateChange((state: RoomState) => {
 
 function getRoomScene(): RoomScene | null {
   const scene = game.scene.getScene('room') as RoomScene | null;
+  if (scene) {
+    roomEditPanel.bindRoomScene(scene);
+  } else {
+    roomEditPanel.bindRoomScene(null);
+  }
   return scene ?? null;
 }

@@ -74,6 +74,9 @@ export class RoomScene extends Phaser.Scene {
   private dragObjectStartX = 0;
   private dragObjectStartY = 0;
 
+  // Modo edición de objetos
+  private isEditMode = false;
+
   constructor() {
     super('room');
   }
@@ -189,7 +192,7 @@ export class RoomScene extends Phaser.Scene {
     if (!obj) return;
 
     const objGO = obj.getGameObject();
-    objGO.setInteractive({ draggable: true });
+    objGO.setInteractive({ draggable: this.isEditMode });
 
     this.input.setDraggable(objGO);
 
@@ -197,6 +200,7 @@ export class RoomScene extends Phaser.Scene {
     const handleDragStart = (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject): void => {
       if (gameObject !== objGO) return;
       if (this.isDraggingObject) return;
+      if (!this.isEditMode) return; // Solo permitir drag en modo edición
       if (this.interactionSystem.tryInteractFromPointer(pointer)) return;
 
       this.isDraggingObject = true;
@@ -213,6 +217,7 @@ export class RoomScene extends Phaser.Scene {
     const handleDrag = (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject, _dragX: number, _dragY: number): void => {
       if (gameObject !== objGO) return;
       if (!this.isDraggingObject) return;
+      if (!this.isEditMode) return; // Solo permitir drag en modo edición
 
       const worldStart = this.cameras.main.getWorldPoint(this.dragStartX, this.dragStartY);
       const worldCurrent = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
@@ -262,6 +267,26 @@ export class RoomScene extends Phaser.Scene {
       // Si falla, el servidor no notificará room:updated y la posición local
       // se mantendrá. En un caso real podríamos revertir visualmente.
     }
+  }
+
+  /** Alterna el modo edición de objetos. */
+  toggleEditMode(): void {
+    this.isEditMode = !this.isEditMode;
+    const btn = document.getElementById('room-edit-toggle-btn');
+    if (btn) {
+      btn.textContent = this.isEditMode ? '✓ Terminar edición' : '✎ Editar habitación';
+      btn.classList.toggle('active', this.isEditMode);
+    }
+    // Actualizar estado interactivo de todos los objetos
+    for (const [_id, obj] of this.roomObjects) {
+      const objGO = obj.getGameObject();
+      objGO.setInteractive({ draggable: this.isEditMode });
+    }
+  }
+
+  /** Indica si el modo edición está activo. */
+  isEditModeActive(): boolean {
+    return this.isEditMode;
   }
 
   private rebuildGeometry(): void {
