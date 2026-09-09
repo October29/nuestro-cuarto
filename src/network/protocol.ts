@@ -145,8 +145,30 @@ export interface RoomObjectPositionPatch {
   y: number;
 }
 
+/** Patch para crear un nuevo objeto en la Room. */
+export interface RoomObjectCreatePatch {
+  /** Tipo de operación: crear objeto. */
+  op: 'create';
+  /** Identificador único del objeto. Generado por el cliente, validado por el servidor. */
+  id: string;
+  /** Tipo del objeto. Determina qué factory Phaser crear. */
+  type: 'sofa' | 'table';
+  /** Posición X inicial del centro del objeto (px). */
+  x: number;
+  /** Posición Y inicial del centro del objeto (px). */
+  y: number;
+}
+
+/** Patch para eliminar un objeto existente de la Room. */
+export interface RoomObjectRemovePatch {
+  /** Tipo de operación: eliminar objeto. */
+  op: 'remove';
+  /** Identificador del objeto a eliminar. */
+  objectId: string;
+}
+
 /** Unión de todos los patches permitidos en room:update. */
-export type RoomUpdatePatch = RoomStatePatch | RoomObjectPositionPatch;
+export type RoomUpdatePatch = RoomStatePatch | RoomObjectPositionPatch | RoomObjectCreatePatch | RoomObjectRemovePatch;
 
 // --- Mensajes de Room State: cliente → servidor ---
 

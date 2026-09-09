@@ -200,9 +200,71 @@ export function createSignalingServer(options = {}) {
           }
           const patch = msg.patch;
 
+          // Distinguir por tipo de operación (op)
+          if (patch.op === 'create') {
+            // Crear un nuevo objeto
+            const createPatch = patch;
+            if (typeof createPatch.id !== 'string' || createPatch.id.length === 0) {
+              send(socket, { type: 'error', message: 'id debe ser un string no vacío' });
+              return;
+            }
+            if (createPatch.type !== 'sofa' && createPatch.type !== 'table') {
+              send(socket, { type: 'error', message: 'type debe ser "sofa" o "table"' });
+              return;
+            }
+            if (typeof createPatch.x !== 'number' || !Number.isFinite(createPatch.x)) {
+              send(socket, { type: 'error', message: 'x debe ser un número finito' });
+              return;
+            }
+            if (typeof createPatch.y !== 'number' || !Number.isFinite(createPatch.y)) {
+              send(socket, { type: 'error', message: 'y debe ser un número finito' });
+              return;
+            }
+
+            // Verificar que no exista ya un objeto con ese ID
+            if (room.state.objects.some((o) => o.id === createPatch.id)) {
+              send(socket, { type: 'error', message: 'ya existe un objeto con ese ID' });
+              return;
+            }
+
+            // Crear el objeto
+            room.state = {
+              ...room.state,
+              objects: [...room.state.objects, { id: createPatch.id, type: createPatch.type, x: createPatch.x, y: createPatch.y }],
+            };
+            broadcastToRoom(room, { type: 'room:updated', state: room.state });
+            console.log(`room:update (create object) aceptado en ${room.code}`);
+            return;
+          }
+
+          if (patch.op === 'remove') {
+            // Eliminar un objeto
+            const removePatch = patch;
+            if (typeof removePatch.objectId !== 'string' || removePatch.objectId.length === 0) {
+              send(socket, { type: 'error', message: 'objectId debe ser un string no vacío' });
+              return;
+            }
+
+            // Verificar que el objeto existe
+            const objIndex = room.state.objects.findIndex((o) => o.id === removePatch.objectId);
+            if (objIndex === -1) {
+              send(socket, { type: 'error', message: 'objeto no encontrado' });
+              return;
+            }
+
+            // Eliminar el objeto
+            room.state = {
+              ...room.state,
+              objects: room.state.objects.filter((o) => o.id !== removePatch.objectId),
+            };
+            broadcastToRoom(room, { type: 'room:updated', state: room.state });
+            console.log(`room:update (remove object) aceptado en ${room.code}`);
+            return;
+          }
+
           // Distinguir entre patch de nombre y patch de posición de objeto
           if ('objectId' in patch && 'x' in patch && 'y' in patch) {
-            // Patch de posición de objeto
+            // Patch de posición de objeto (formato legacy)
             const objectPatch = patch;
             if (typeof objectPatch.objectId !== 'string' || objectPatch.objectId.length === 0) {
               send(socket, { type: 'error', message: 'objectId debe ser un string no vacío' });

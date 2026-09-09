@@ -1,6 +1,6 @@
 import { SignalingClient } from './SignalingClient';
 import { RtcPeerTransport } from './RtcPeerTransport';
-import type { PeerMessage, RoomState, RoomUpdatePatch } from './protocol';
+import type { PeerMessage, RoomState, RoomUpdatePatch, RoomObjectCreatePatch } from './protocol';
 import type { NetworkTransport, TransportHandlers } from './NetworkTransport';
 
 export type SessionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -177,6 +177,28 @@ export class NetworkSession {
       this.handlers.onRoomUpdated?.(state);
       return state;
     });
+  }
+
+  /**
+   * Crea un nuevo objeto en la Room (Room State Step 13).
+   *
+   * Envía una operación de creación al servidor, que valida el objeto,
+   * lo agrega al RoomState y notifica a todos los participantes.
+   * Devuelve el RoomState actualizado.
+   */
+  addRoomObject(object: RoomObjectCreatePatch): Promise<RoomState> {
+    return this.updateRoomState(object);
+  }
+
+  /**
+   * Elimina un objeto existente de la Room (Room State Step 13).
+   *
+   * Envía una operación de eliminación al servidor, que valida el ID,
+   * elimina el objeto del RoomState y notifica a todos los participantes.
+   * Devuelve el RoomState actualizado.
+   */
+  removeRoomObject(objectId: string): Promise<RoomState> {
+    return this.updateRoomState({ op: 'remove', objectId });
   }
 
   /** Cierre local de la sesión (no notifica onPeerLeft: lo hace el usuario). */
