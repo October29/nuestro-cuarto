@@ -284,8 +284,8 @@ descarta el trabajo pendiente.
    - Crear `MediaManager` con su API de captura (cámara/mic) y su ciclo de vida efímero.
    - `getUserMedia` en contexto seguro y manejo de permisos/`onended`/`onmute`.
    - Mocks de media para tests (sin `MediaManager` real).
-   - Decidir y probar en B8 únicamente **cámara**; micrófono y pantalla quedan fuera hasta
-     que cámara esté estable.
+   - Decidir y probar en B8 **cámara y micrófono** (sin pantalla); la compartición de
+     pantalla queda fuera hasta que cámara/mic estén estables.
    - No introducir TURN/STUN nuevo ni simulcast en esta etapa.
 
 ### Riesgos
