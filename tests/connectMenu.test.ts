@@ -214,6 +214,10 @@ describe('ConnectMenu: una sola NetworkSession produce una sola notificación de
 describe('ConnectMenu: signalingUrl configurable', () => {
   let server: TestSignalingServer | null = null;
 
+  beforeEach(() => {
+    installDomMocks();
+  });
+
   afterEach(async () => {
     if (server) {
       await server.close();
@@ -243,16 +247,53 @@ describe('ConnectMenu: signalingUrl configurable', () => {
   });
 
   it('usa el default (location.hostname) cuando no se proporciona signalingUrl', async () => {
-    // Sin signalingUrl explícito, SignalingClient usa defaultSignalingUrl()
     // En Node.js (tests), defaultSignalingUrl() devuelve 'ws://localhost:8787'
-    // Verificamos que se construye la URL por defecto correctamente sin necesidad
-    // de conectar (el comportamiento de conexión se prueba en signalingClient.test.ts)
-    const { SignalingClient } = await import('../src/network/SignalingClient');
-    const client = new SignalingClient(); // sin URL -> usa default
-    // En entorno de test (Node), defaultSignalingUrl() usa 'ws://localhost:8787'
-    // No podemos acceder a la propiedad privada 'url', pero podemos verificar
-    // que el cliente se crea sin error y su estado es 'idle'
-    assert.equal(client.state, 'idle');
-    // La URL real se resuelve internamente al conectar
+    // Interceptamos el constructor de WebSocket para observar la URL real usada.
+    const originalWebSocket = globalThis.WebSocket;
+    let capturedUrl: string | null = null;
+
+    try {
+      // @ts-expect-error - sobreecribimos WebSocket global para test
+      globalThis.WebSocket = class MockWebSocket {
+        url: string;
+        readyState = 0; // CONNECTING
+        onopen: (() => void) | null = null;
+        onerror: ((event: ErrorEvent) => void) | null = null;
+        onmessage: ((event: MessageEvent) => void) | null = null;
+        onclose: (() => void) | null = null;
+
+        constructor(url: string) {
+          capturedUrl = url;
+          this.url = url;
+          // Simula conexión fallida (no hay servidor en localhost:8787)
+          setTimeout(() => {
+            this.readyState = 3; // CLOSED
+            this.onerror?.(new ErrorEvent('error'));
+          }, 0);
+        }
+        send() {}
+        close() {
+          this.readyState = 3;
+          this.onclose?.();
+        }
+        addEventListener() {}
+        removeEventListener() {}
+      };
+
+      const { SignalingClient } = await import('../src/network/SignalingClient');
+      const client = new SignalingClient(); // sin URL -> usa default
+
+      // Intentamos conectar para que se construya la URL
+      try {
+        await client.connect();
+      } catch {
+        // Se espera que falle porque no hay servidor en localhost:8787
+      }
+
+      assert.ok(capturedUrl, 'debe haberse intentado conectar a una URL');
+      assert.equal(capturedUrl, 'ws://localhost:8787', 'la URL por defecto debe ser ws://localhost:8787');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
   });
 });
