@@ -94,43 +94,107 @@ describe('MediaManager: captura local (B8)', () => {
     assert.ok(manager.isMicEnabled());
   });
 
-  it('no duplica captura si se activa dos veces', async () => {
+  it('no duplica captura en llamadas secuenciales', async () => {
     await manager.enableCamera();
     await manager.enableCamera();
     assert.equal(gumCalls.length, 1, 'una sola llamada a getUserMedia');
-
-    const prevCallCount = gumCalls.length;
-    const [a, b] = await Promise.all([manager.enableCamera(), manager.enableCamera()]);
-    assert.equal(a, undefined);
-    assert.equal(b, undefined);
-    assert.equal(gumCalls.length, prevCallCount, 'tampoco duplica capturas concurrentes');
     assert.ok(manager.isCameraEnabled());
   });
 
-  it('disableCamera detiene únicamente los tracks de vídeo', async () => {
+  it('no duplica captura en llamadas concurrentes (cámara)', async () => {
+    const [a, b] = await Promise.all([manager.enableCamera(), manager.enableCamera()]);
+
+    assert.equal(a, undefined);
+    assert.equal(b, undefined);
+    assert.equal(gumCalls.length, 1, 'una sola llamada a getUserMedia');
+    assert.equal(manager.getActiveTracks().length, 1, 'exactamente una captura activa');
+    assert.ok(manager.isCameraEnabled());
+  });
+
+  it('no duplica captura en llamadas concurrentes (micrófono)', async () => {
+    const [a, b] = await Promise.all([manager.enableMic(), manager.enableMic()]);
+
+    assert.equal(a, undefined);
+    assert.equal(b, undefined);
+    assert.equal(gumCalls.length, 1, 'una sola llamada a getUserMedia');
+    assert.equal(manager.getActiveTracks().length, 1, 'exactamente una captura activa');
+    assert.ok(manager.isMicEnabled());
+  });
+
+  it('disableCamera detiene la captura de cámara (stream de vídeo puro)', async () => {
+    await manager.enableCamera();
+    const videoTrack = manager.getActiveTracks()[0].track;
+
+    manager.disableCamera();
+
+    assert.equal(videoTrack.readyState, 'ended');
+    assert.equal(manager.isCameraEnabled(), false);
+    assert.equal(manager.getCameraStream(), null);
+    assert.equal(manager.getActiveTracks().length, 0);
+  });
+
+  it('disableMic detiene la captura de micrófono (stream de audio puro)', async () => {
+    await manager.enableMic();
+    const audioTrack = manager.getActiveTracks()[0].track;
+
+    manager.disableMic();
+
+    assert.equal(audioTrack.readyState, 'ended');
+    assert.equal(manager.isMicEnabled(), false);
+    assert.equal(manager.getMicStream(), null);
+    assert.equal(manager.getActiveTracks().length, 0);
+  });
+
+  it('regresión: disableCamera no abandona un track de audio compartido', async () => {
     const videoTrack = makeTrack('video');
     const audioTrack = makeTrack('audio');
     gumImpl = () => Promise.resolve(makeStream(videoTrack, audioTrack));
 
     await manager.enableCamera();
+    assert.equal(manager.getActiveTracks().length, 2, 'el stream fake comparte ambos kinds');
+
     manager.disableCamera();
 
     assert.equal(videoTrack.readyState, 'ended');
-    assert.equal(audioTrack.readyState, 'live', 'no debe detener el track de audio compartido');
+    assert.equal(audioTrack.readyState, 'live', 'el audio sigue vivo');
     assert.equal(manager.isCameraEnabled(), false);
+    assert.equal(manager.isMicEnabled(), true, 'el audio queda retenido bajo control del manager');
+
+    const active = manager.getActiveTracks();
+    assert.equal(active.length, 1, 'el audio sigue controlado');
+    assert.equal(active[0].kind, 'mic');
+    assert.equal(active[0].track, audioTrack);
+
+    // El track retenido se detiene al cerrar el manager.
+    manager.close();
+    assert.equal(audioTrack.readyState, 'ended');
+    assert.equal(manager.getActiveTracks().length, 0);
   });
 
-  it('disableMic detiene únicamente los tracks de audio', async () => {
+  it('regresión: disableMic no abandona un track de vídeo compartido', async () => {
     const audioTrack = makeTrack('audio');
     const videoTrack = makeTrack('video');
     gumImpl = () => Promise.resolve(makeStream(audioTrack, videoTrack));
 
     await manager.enableMic();
+    assert.equal(manager.getActiveTracks().length, 2, 'el stream fake comparte ambos kinds');
+
     manager.disableMic();
 
     assert.equal(audioTrack.readyState, 'ended');
-    assert.equal(videoTrack.readyState, 'live', 'no debe detener el track de vídeo compartido');
+    assert.equal(videoTrack.readyState, 'live', 'el vídeo sigue vivo');
     assert.equal(manager.isMicEnabled(), false);
+    assert.equal(manager.isCameraEnabled(), true, 'el vídeo queda retenido bajo control del manager');
+
+    const active = manager.getActiveTracks();
+    assert.equal(active.length, 1, 'el vídeo sigue controlado');
+    assert.equal(active[0].kind, 'camera');
+    assert.equal(active[0].track, videoTrack);
+
+    // El track retenido se detiene al cerrar el manager.
+    manager.close();
+    assert.equal(videoTrack.readyState, 'ended');
+    assert.equal(manager.getActiveTracks().length, 0);
   });
 
   it('el error de permisos/captura no deja el manager en estado activo', async () => {
