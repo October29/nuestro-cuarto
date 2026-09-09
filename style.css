@@ -191,19 +191,6 @@
   min-width: 200px;
 }
 
-#room-edit-panel {
-  pointer-events: auto;
-  background: rgba(24, 34, 56, 0.92);
-  border: 1px solid #3d4a72;
-  border-radius: 8px;
-  padding: 8px 12px;
-  color: #d8deff;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 200px;
-}
-
 #room-name-display {
   font-weight: 600;
   color: #ffd98a;

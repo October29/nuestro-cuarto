@@ -277,6 +277,11 @@ export class RoomScene extends Phaser.Scene {
       btn.textContent = this.isEditMode ? '✓ Terminar edición' : '✎ Editar habitación';
       btn.classList.toggle('active', this.isEditMode);
     }
+    // Si se desactiva el modo edición y hay un drag activo, cancelarlo
+    if (!this.isEditMode && this.isDraggingObject) {
+      this.isDraggingObject = false;
+      this.draggedObjectId = null;
+    }
     // Actualizar estado interactivo de todos los objetos
     for (const [_id, obj] of this.roomObjects) {
       const objGO = obj.getGameObject();
