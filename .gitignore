@@ -7,3 +7,6 @@ build/
 .env
 .env.*
 !.env.example
+
+# Datos runtime del servidor de signaling (habitaciones persistidas)
+data/rooms/
