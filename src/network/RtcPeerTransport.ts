@@ -35,6 +35,8 @@ export class RtcPeerTransport implements NetworkTransport {
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private status: TransportState = 'idle';
   private negotiating = false;
+  private renegotiationQueue: Array<() => Promise<void>> = [];
+  private processingQueue = false;
 
   constructor(
     private readonly signaling: SignalingClient,
@@ -127,6 +129,13 @@ export class RtcPeerTransport implements NetworkTransport {
       this.channel = event.channel;
       this.setupChannel(event.channel);
     };
+    this.connection.onnegotiationneeded = () => {
+      // Disparado al añadir/quitar tracks (addTrack, removeTrack, etc.)
+      // Solo encolar si la conexión está abierta y estable
+      if (this.status === 'open' && this.connection?.signalingState === 'stable') {
+        this.renegotiate();
+      }
+    };
   }
 
   private startNegotiationTimeout(): void {
@@ -144,6 +153,51 @@ export class RtcPeerTransport implements NetworkTransport {
     } catch {
       this.fail('no se pudo crear el offer');
     }
+  }
+
+  /**
+   * Solicita una renegociación SDP (ej. al añadir/quitar tracks de media).
+   * Encola la renegociación para evitar ofertas simultáneas.
+   */
+  renegotiate(): void {
+    if (this.status === 'closed' || !this.connection) return;
+
+    const work = async () => {
+      if (this.status === 'closed' || !this.connection) return;
+      if (this.connection.signalingState !== 'stable') return;
+
+      try {
+        await this.makeOffer();
+      } catch {
+        // makeOffer ya maneja el error con this.fail()
+      }
+    };
+
+    this.renegotiationQueue.push(work);
+    this.processQueue();
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.processingQueue || this.renegotiationQueue.length === 0) return;
+
+    this.processingQueue = true;
+
+    while (this.renegotiationQueue.length > 0) {
+      if (this.status === 'closed' || !this.connection) break;
+
+      const work = this.renegotiationQueue.shift();
+      if (!work) continue;
+
+      if (this.connection.signalingState !== 'stable') {
+        // Volver a encolar si no está estable
+        this.renegotiationQueue.unshift(work);
+        break;
+      }
+
+      await work();
+    }
+
+    this.processingQueue = false;
   }
 
   private async handleIncomingSignal(data: SignalPayload): Promise<void> {
