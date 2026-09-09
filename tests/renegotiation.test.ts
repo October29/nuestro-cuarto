@@ -275,23 +275,52 @@ describe('RtcPeerTransport: renegotiation (B6)', () => {
     assert.equal(onErrorMsg, null, 'no debe haber error durante renegociación');
   });
 
-  it('dos solicitudes simultáneas de renegociación no generan dos offers concurrentes', async () => {
+it('dos solicitudes simultáneas de renegociación se procesan secuencialmente tras answer', async () => {
     await transport.connect();
     signaling.simulatePeerJoined();
 
     await new Promise(r => setTimeout(r, 50));
 
-    // Disparar dos renegociaciones simultáneas
+    // Estado inicial: 1 offer (negociación inicial)
+    const initialOffers = signaling.sentSignals.filter(s => s.kind === 'offer').length;
+    assert.equal(initialOffers, 1);
+
+    // Primera renegociación: disparar negotiationneeded
     const pc = MockRTCPeerConnection.instances[0];
-    pc.triggerNegotiationNeeded();
-    pc.triggerNegotiationNeeded();
+    pc.signalingState = 'stable'; // asegurar estado estable
+    pc.triggerNegotiationNeeded(); // renegociación 1
 
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 50));
 
-    // Solo debe haber un offer adicional (el segundo se encola y se procesa cuando la conexión está estable)
-    const totalOffers = signaling.sentSignals.filter(s => s.kind === 'offer').length;
-    // El test verifica que no hay tormenta de offers; la cola los procesa secuencialmente
-    assert.ok(totalOffers <= 3, 'no debe haber tormenta de offers (máx 1 adicional en este mock)');
+    // Primera renegociación genera offer
+    let totalOffers = signaling.sentSignals.filter(s => s.kind === 'offer').length;
+    assert.ok(totalOffers >= 2, 'debe generar el primer offer de renegociación');
+
+    // Simular answer para la primera renegociación
+    signaling.simulateIncomingSignal({ kind: 'answer', sdp: 'answer-1' });
+
+    await new Promise(r => setTimeout(r, 50));
+
+    // Tras el answer, la conexión vuelve a stable
+    // Segunda renegociación: disparar de nuevo
+    pc.signalingState = 'stable';
+    pc.triggerNegotiationNeeded(); // renegociación 2
+
+    await new Promise(r => setTimeout(r, 50));
+
+    // Tras el answer, la segunda renegociación pendiente debe procesarse
+    // y generar un segundo offer de renegociación
+    totalOffers = signaling.sentSignals.filter(s => s.kind === 'offer').length;
+    assert.ok(totalOffers >= 3, 'la segunda renegociación pendiente debe procesarse tras el answer');
+
+    // Simular answer para la segunda renegociación
+    signaling.simulateIncomingSignal({ kind: 'answer', sdp: 'answer-2' });
+
+    await new Promise(r => setTimeout(r, 50));
+
+    // No debe quedar trabajo pendiente en la cola
+    const finalOffers = signaling.sentSignals.filter(s => s.kind === 'offer').length;
+    assert.ok(finalOffers >= 3, 'se procesaron ambas renegociaciones');
   });
 
   it('renegotiate() sin peer no rompe nada', async () => {

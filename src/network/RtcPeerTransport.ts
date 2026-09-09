@@ -82,6 +82,8 @@ export class RtcPeerTransport implements NetworkTransport {
     if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
     this.timeoutTimer = null;
     this.negotiating = false;
+    this.renegotiationQueue = [];
+    this.processingQueue = false;
     this.channel = null;
     this.closeConnection();
     this.unsubscribeSignaling?.();
@@ -219,6 +221,9 @@ export class RtcPeerTransport implements NetworkTransport {
           const pc = this.connection;
           if (!pc || pc.signalingState !== 'have-local-offer') break;
           await pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+          // Después de aplicar el answer, el signalingState vuelve a 'stable'.
+          // Procesar cualquier renegociación pendiente en la cola.
+          this.processQueue();
           break;
         }
         case 'ice': {
@@ -284,6 +289,8 @@ export class RtcPeerTransport implements NetworkTransport {
     this.timeoutTimer = null;
     this.channel = null;
     this.negotiating = false;
+    this.renegotiationQueue = [];
+    this.processingQueue = false;
     this.closeConnection();
   }
 
