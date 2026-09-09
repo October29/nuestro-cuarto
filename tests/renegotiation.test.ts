@@ -275,52 +275,60 @@ describe('RtcPeerTransport: renegotiation (B6)', () => {
     assert.equal(onErrorMsg, null, 'no debe haber error durante renegociación');
   });
 
-it('dos solicitudes simultáneas de renegociación se procesan secuencialmente tras answer', async () => {
+  it('dos solicitudes de renegociación: segunda se encola mientras hay offer pendiente y se procesa tras answer', async () => {
     await transport.connect();
     signaling.simulatePeerJoined();
 
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise(r => setTimeout(r, 100));
 
     // Estado inicial: 1 offer (negociación inicial)
     const initialOffers = signaling.sentSignals.filter(s => s.kind === 'offer').length;
     assert.equal(initialOffers, 1);
 
-    // Primera renegociación: disparar negotiationneeded
+    // Responder al offer inicial para dejar la conexión realmente en 'stable'
+    signaling.simulateIncomingSignal({ kind: 'answer', sdp: 'answer-inicial' });
+
+    await new Promise(r => setTimeout(r, 100));
+
     const pc = MockRTCPeerConnection.instances[0];
-    pc.signalingState = 'stable'; // asegurar estado estable
-    pc.triggerNegotiationNeeded(); // renegociación 1
+    assert.equal(pc.signalingState, 'stable', 'la conexión debe estar estable antes de renegociar');
 
-    await new Promise(r => setTimeout(r, 50));
+    // Primera renegociación: genera offer-1 y deja 'have-local-offer'
+    pc.triggerNegotiationNeeded();
 
-    // Primera renegociación genera offer
-    let totalOffers = signaling.sentSignals.filter(s => s.kind === 'offer').length;
-    assert.ok(totalOffers >= 2, 'debe generar el primer offer de renegociación');
+    await new Promise(r => setTimeout(r, 150));
 
-    // Simular answer para la primera renegociación
+    const offersAfterFirst = signaling.sentSignals.filter(s => s.kind === 'offer').length;
+    assert.equal(offersAfterFirst, 2, 'debe generar el primer offer de renegociación');
+    assert.equal(pc.signalingState, 'have-local-offer', 'la primera renegociación deja offer pendiente');
+
+    // SEGUNDA renegociación ANTES del answer-1: signalingState != 'stable',
+    // así que debe quedar pendiente en la cola sin generar offer concurrente
+    pc.triggerNegotiationNeeded();
+
+    await new Promise(r => setTimeout(r, 20));
+
+    const offersBeforeAnswer = signaling.sentSignals.filter(s => s.kind === 'offer').length;
+    assert.equal(offersBeforeAnswer, 2, 'no debe haber offer concurrente mientras hay uno pendiente');
+
+    // Aplicar answer-1: setRemoteDescription vuelve a 'stable' y el
+    // processQueue() invocado desde el handler del answer reanuda lo encolado
     signaling.simulateIncomingSignal({ kind: 'answer', sdp: 'answer-1' });
 
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise(r => setTimeout(r, 200));
 
-    // Tras el answer, la conexión vuelve a stable
-    // Segunda renegociación: disparar de nuevo
-    pc.signalingState = 'stable';
-    pc.triggerNegotiationNeeded(); // renegociación 2
+    const offersAfterAnswer1 = signaling.sentSignals.filter(s => s.kind === 'offer').length;
+    assert.equal(offersAfterAnswer1, 3, 'el offer encolado debe generarse automáticamente tras el answer');
 
-    await new Promise(r => setTimeout(r, 50));
-
-    // Tras el answer, la segunda renegociación pendiente debe procesarse
-    // y generar un segundo offer de renegociación
-    totalOffers = signaling.sentSignals.filter(s => s.kind === 'offer').length;
-    assert.ok(totalOffers >= 3, 'la segunda renegociación pendiente debe procesarse tras el answer');
-
-    // Simular answer para la segunda renegociación
+    // Aplicar answer-2 para la segunda renegociación
     signaling.simulateIncomingSignal({ kind: 'answer', sdp: 'answer-2' });
 
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise(r => setTimeout(r, 100));
 
-    // No debe quedar trabajo pendiente en la cola
+    // No debe haber otro offer ni quedar trabajo pendiente
     const finalOffers = signaling.sentSignals.filter(s => s.kind === 'offer').length;
-    assert.ok(finalOffers >= 3, 'se procesaron ambas renegociaciones');
+    assert.equal(finalOffers, 3, 'no debe generarse otro offer tras responder la segunda renegociación');
+    assert.equal(pc.signalingState, 'stable', 'la conexión queda estable, sin trabajo pendiente');
   });
 
   it('renegotiate() sin peer no rompe nada', async () => {

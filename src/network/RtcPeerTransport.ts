@@ -132,9 +132,11 @@ export class RtcPeerTransport implements NetworkTransport {
       this.setupChannel(event.channel);
     };
     this.connection.onnegotiationneeded = () => {
-      // Disparado al añadir/quitar tracks (addTrack, removeTrack, etc.)
-      // Solo encolar si la conexión está abierta y estable
-      if (this.status === 'open' && this.connection?.signalingState === 'stable') {
+      // Disparado al añadir/quitar tracks (addTrack, removeTrack, etc.).
+      // renegotiate() encola y processQueue() re-encola internamente mientras
+      // signalingState !== 'stable', evitando offers concurrentes y reanudando
+      // automáticamente cuando el answer entrante vuelve a invocar processQueue().
+      if (this.status === 'open') {
         this.renegotiate();
       }
     };
