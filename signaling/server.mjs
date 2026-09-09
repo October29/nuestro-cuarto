@@ -297,40 +297,39 @@ export function createSignalingServer(options = {}) {
 
           // Distinguir por tipo de operación (op)
           if (patch.op === 'create') {
-            // Crear un nuevo objeto
-            const createPatch = patch;
-            if (typeof createPatch.id !== 'string' || createPatch.id.length === 0) {
-              send(socket, { type: 'error', message: 'id debe ser un string no vacío' });
-              return;
-            }
-            if (createPatch.type !== 'sofa' && createPatch.type !== 'table') {
-              send(socket, { type: 'error', message: 'type debe ser "sofa" o "table"' });
-              return;
-            }
-            if (typeof createPatch.x !== 'number' || !Number.isFinite(createPatch.x)) {
-              send(socket, { type: 'error', message: 'x debe ser un número finito' });
-              return;
-            }
-            if (typeof createPatch.y !== 'number' || !Number.isFinite(createPatch.y)) {
-              send(socket, { type: 'error', message: 'y debe ser un número finito' });
-              return;
-            }
-
-            // Verificar que no exista ya un objeto con ese ID
-            if (room.state.objects.some((o) => o.id === createPatch.id)) {
-              send(socket, { type: 'error', message: 'ya existe un objeto con ese ID' });
-              return;
-            }
-
-            // Crear el objeto
-            room.state = {
-              ...room.state,
-              objects: [...room.state.objects, { id: createPatch.id, type: createPatch.type, x: createPatch.x, y: createPatch.y }],
-            };
-            broadcastToRoom(room, { type: 'room:updated', state: room.state });
-            persistRoomState(room.code, room.state, env);
-            console.log(`room:update (create object) aceptado en ${room.code}`);
+// Crear un nuevo objeto
+          const createPatch = patch;
+          if (createPatch.type !== 'sofa' && createPatch.type !== 'table') {
+            send(socket, { type: 'error', message: 'type debe ser "sofa" o "table"' });
             return;
+          }
+          if (typeof createPatch.x !== 'number' || !Number.isFinite(createPatch.x)) {
+            send(socket, { type: 'error', message: 'x debe ser un número finito' });
+            return;
+          }
+          if (typeof createPatch.y !== 'number' || !Number.isFinite(createPatch.y)) {
+            send(socket, { type: 'error', message: 'y debe ser un número finito' });
+            return;
+          }
+
+          // Generar ID único autoritativamente en el servidor
+          const newId = crypto.randomUUID();
+
+          // Verificar que no exista ya un objeto con ese ID (extremadamente improbable con UUID)
+          if (room.state.objects.some((o) => o.id === newId)) {
+            send(socket, { type: 'error', message: 'colisión de ID, reintente' });
+            return;
+          }
+
+          // Crear el objeto
+          room.state = {
+            ...room.state,
+            objects: [...room.state.objects, { id: newId, type: createPatch.type, x: createPatch.x, y: createPatch.y }],
+          };
+          broadcastToRoom(room, { type: 'room:updated', state: room.state });
+          persistRoomState(room.code, room.state, env);
+          console.log(`room:update (create object) aceptado en ${room.code}`);
+          return;
           }
 
           if (patch.op === 'remove') {

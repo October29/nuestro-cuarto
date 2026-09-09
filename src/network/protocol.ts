@@ -149,8 +149,6 @@ export interface RoomObjectPositionPatch {
 export interface RoomObjectCreatePatch {
   /** Tipo de operación: crear objeto. */
   op: 'create';
-  /** Identificador único del objeto. Generado por el cliente, validado por el servidor. */
-  id: string;
   /** Tipo del objeto. Determina qué factory Phaser crear. */
   type: 'sofa' | 'table';
   /** Posición X inicial del centro del objeto (px). */

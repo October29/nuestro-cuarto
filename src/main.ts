@@ -35,6 +35,7 @@ connectMenu.onSessionChange((session) => {
     roomNamePanel.bindSession(null);
   }
   getRoomScene()?.setNetworkSession(session);
+  roomEditPanel.bindRoomScene(getRoomScene(), session);
 });
 
 connectMenu.onRoomStateChange((state: RoomState) => {
@@ -44,10 +45,5 @@ connectMenu.onRoomStateChange((state: RoomState) => {
 
 function getRoomScene(): RoomScene | null {
   const scene = game.scene.getScene('room') as RoomScene | null;
-  if (scene) {
-    roomEditPanel.bindRoomScene(scene);
-  } else {
-    roomEditPanel.bindRoomScene(null);
-  }
   return scene ?? null;
 }

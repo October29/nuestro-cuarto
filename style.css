@@ -178,6 +178,26 @@
   color: #fff;
 }
 
+#room-edit-add-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#room-edit-add-form button {
+  background: #4a5a8a;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#room-edit-add-form button:hover {
+  background: #5a6aa8;
+}
+
 #room-name-panel {
   pointer-events: auto;
   background: rgba(24, 34, 56, 0.92);

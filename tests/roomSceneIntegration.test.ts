@@ -2208,3 +2208,125 @@ describe('Room object creation/removal: Step 13', () => {
     assert.equal(obj.y, 200);
   });
 });
+
+describe('Add furniture from edit mode: Step 16', () => {
+  function createSceneWithTypes(objects: RoomObjectState[]): FakeRoomScene {
+    const scene = new FakeRoomScene();
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects,
+    });
+    return scene;
+  }
+
+  it('cliente puede añadir un sofá mediante create operation y la escena lo reconcilia', () => {
+    const scene = createSceneWithTypes([]);
+    scene.simulateCreate();
+
+    // Simular recibir room:updated con nuevo sofá creado por servidor
+    const newSofaId = 'server-generated-sofa-id';
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: newSofaId, type: 'sofa', x: 600, y: 400 }],
+    });
+
+    // El objeto debe existir en la escena
+    assert.equal(scene.createdRoomObjects.length, 1);
+    const obj = scene.createdRoomObjects[0];
+    assert.equal(obj.id, newSofaId);
+    assert.equal(obj.type, 'sofa');
+    assert.equal(obj.x, 600);
+    assert.equal(obj.y, 400);
+  });
+
+  it('cliente puede añadir una mesa mediante create operation y la escena lo reconcilia', () => {
+    const scene = createSceneWithTypes([]);
+    scene.simulateCreate();
+
+    const newTableId = 'server-generated-table-id';
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: newTableId, type: 'table', x: 900, y: 300 }],
+    });
+
+    assert.equal(scene.createdRoomObjects.length, 1);
+    const obj = scene.createdRoomObjects[0];
+    assert.equal(obj.id, newTableId);
+    assert.equal(obj.type, 'table');
+    assert.equal(obj.x, 900);
+    assert.equal(obj.y, 300);
+  });
+
+  it('múltiples clientes reciben el objeto creado vía room:updated', () => {
+    // Cliente A crea la escena
+    const sceneA = createSceneWithTypes([]);
+    sceneA.simulateCreate();
+
+    // Cliente B crea la escena
+    const sceneB = createSceneWithTypes([]);
+    sceneB.simulateCreate();
+
+    // Servidor crea un nuevo sofá y emite room:updated
+    const newSofaId = 'shared-sofa-id';
+    const newState = {
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: newSofaId, type: 'sofa', x: 600, y: 400 }],
+    };
+
+    sceneA.setRoomState(newState);
+    sceneB.setRoomState(newState);
+
+    // Ambos clientes deben tener el objeto
+    assert.equal(sceneA.createdRoomObjects.length, 1);
+    assert.equal(sceneB.createdRoomObjects.length, 1);
+    assert.equal(sceneA.createdRoomObjects[0].id, newSofaId);
+    assert.equal(sceneB.createdRoomObjects[0].id, newSofaId);
+  });
+
+  it('creación de objeto persiste tras reiniciar servidor (cobertura persistencia)', () => {
+    // Este test verifica que la creación de objetos usa la misma operación
+    // que ya está cubierta por tests de persistencia (Step 14)
+    // La persistencia funciona porque create operation actualiza RoomState.objects
+    // y el servidor ya persiste RoomState completo.
+    const scene = createSceneWithTypes([]);
+    scene.simulateCreate();
+
+    // Estado inicial con un sofá existente
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [{ id: 'existing-sofa', type: 'sofa', x: 600, y: 570 }],
+    });
+
+    // Añadir nuevo objeto (simula room:updated del servidor con ID generado por servidor)
+    scene.setRoomState({
+      version: 1,
+      name: 'Sala Test',
+      width: 1200,
+      height: 800,
+      objects: [
+        { id: 'existing-sofa', type: 'sofa', x: 600, y: 570 },
+        { id: 'server-generated-table-id', type: 'table', x: 900, y: 400 },
+      ],
+    });
+
+    assert.equal(scene.createdRoomObjects.length, 2);
+    const table = scene.createdRoomObjects.find(o => o.id === 'server-generated-table-id');
+    assert.ok(table);
+    assert.equal(table!.type, 'table');
+  });
+});

@@ -67,7 +67,7 @@ describe('Persistencia de RoomState (Step 14)', () => {
     return socket.next();
   }
 
-  async function createObject(socket: any, object: { id: string; type: 'sofa' | 'table'; x: number; y: number }): Promise<any> {
+  async function createObject(socket: any, object: { type: 'sofa' | 'table'; x: number; y: number }): Promise<any> {
     socket.send({ type: 'room:update', patch: { op: 'create', ...object } });
     return socket.next();
   }
@@ -155,8 +155,11 @@ describe('Persistencia de RoomState (Step 14)', () => {
       const s = await withServer(dataDir);
       const { roomCode, socket } = await createRoom(s.url);
 
-      // Crear nueva mesa
-      await createObject(socket, { id: 'table-2', type: 'table', x: 300, y: 300 });
+      // Crear nueva mesa (el servidor genera el ID)
+      const createResponse = await createObject(socket, { type: 'table', x: 300, y: 300 });
+      assert.equal(createResponse.type, 'room:updated');
+      const newTableId = createResponse.state.objects.find(o => o.x === 300 && o.y === 300 && o.type === 'table')!.id;
+
       await socket.close();
       await s.close();
 
@@ -164,13 +167,13 @@ describe('Persistencia de RoomState (Step 14)', () => {
       const s2 = await withServer(dataDir);
       const { socket: sock2 } = await joinRoom(s2.url, roomCode);
       let state = await getRoomState(sock2);
-      let table2 = state.state.objects.find(o => o.id === 'table-2');
+      let table2 = state.state.objects.find(o => o.id === newTableId);
       assert.ok(table2);
       assert.equal(table2.x, 300);
       assert.equal(table2.y, 300);
 
       // Eliminar la mesa
-      await removeObject(sock2, 'table-2');
+      await removeObject(sock2, newTableId);
       await sock2.close();
       await s2.close();
 
@@ -178,7 +181,7 @@ describe('Persistencia de RoomState (Step 14)', () => {
       const s3 = await withServer(dataDir);
       const { socket: sock3 } = await joinRoom(s3.url, roomCode);
       state = await getRoomState(sock3);
-      const deletedTable = state.state.objects.find(o => o.id === 'table-2');
+      const deletedTable = state.state.objects.find(o => o.id === newTableId);
       assert.ok(!deletedTable);
 
       await sock3.close();
@@ -443,15 +446,17 @@ describe('Persistencia de RoomState (Step 14)', () => {
       const s = await withServer(dataDir);
       const { roomCode, socket } = await createRoom(s.url);
 
-      // Crear nuevo objeto
-      await createObject(socket, { id: 'chair-1', type: 'table', x: 400, y: 300 });
+      // Crear nuevo objeto (el servidor genera el ID)
+      const createResponse = await createObject(socket, { type: 'table', x: 400, y: 300 });
+      assert.equal(createResponse.type, 'room:updated');
+      const newObjectId = createResponse.state.objects.find(o => o.x === 400 && o.y === 300 && o.type === 'table')!.id;
       await socket.close();
 
       // Segundo cliente ve el objeto nuevo
       const s2 = await withServer(dataDir);
       const { socket: sock2 } = await joinRoom(s2.url, roomCode);
       const state = await getRoomState(sock2);
-      const chair = state.state.objects.find(o => o.id === 'chair-1');
+      const chair = state.state.objects.find(o => o.id === newObjectId);
       assert.ok(chair);
       assert.equal(chair.type, 'table');
       assert.equal(chair.x, 400);
