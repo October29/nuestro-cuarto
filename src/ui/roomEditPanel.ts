@@ -1,5 +1,6 @@
 import type { RoomScene } from '../game/scenes/RoomScene';
 import type { NetworkSession } from '../network/NetworkSession';
+import type { RoomObjectCreatePatch } from '../network/protocol';
 
 /** Panel de edición de habitación: permite activar/desactivar modo edición y añadir muebles. */
 export class RoomEditPanel {
@@ -43,15 +44,21 @@ export class RoomEditPanel {
     if (!this.activeSession || this.activeSession.state !== 'connected') return;
     if (!this.roomScene || !this.roomScene.isEditModeActive()) return;
 
-    // Posición inicial determinista (centro de la habitación con pequeño offset)
-    const x = 600 + (type === 'table' ? 300 : 0);
-    const y = 400 + (type === 'table' ? -100 : 0);
+    const center = this.roomScene.getRoomCenter();
+    // Offset pequeño para evitar solapamiento exacto con el centro
+    const offsetX = type === 'table' ? 150 : -150;
+    const offsetY = type === 'table' ? -100 : 0;
 
-    const patch = { op: 'create' as const, type, x, y };
+    const patch: RoomObjectCreatePatch = {
+      op: 'create',
+      type,
+      x: center.x + offsetX,
+      y: center.y + offsetY,
+    };
     try {
-      await this.activeSession.updateRoomState(patch as any);
-    } catch {
-      // El servidor responderá con error o room:updated
+      await this.activeSession.addRoomObject(patch);
+    } catch (error) {
+      console.error('[RoomEditPanel] Error al crear objeto:', error);
     }
   }
 

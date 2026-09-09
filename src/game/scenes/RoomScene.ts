@@ -442,6 +442,11 @@ export class RoomScene extends Phaser.Scene {
     return this.roomState;
   }
 
+  /** Devuelve el centro de la habitación (basado en dimensiones autoritativas). */
+  getRoomCenter(): { x: number; y: number } {
+    return { x: this.roomWidth / 2, y: this.roomHeight / 2 };
+  }
+
   private startSync(session: NetworkSession): void {
     console.log(
       `[M07A-DIAG] [${new Date().toISOString()}] [RoomScene startSync]`,
