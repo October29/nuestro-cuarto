@@ -17,6 +17,9 @@ export interface ConnectMenuOptions {
   createSession?: (handlers: SessionHandlers) => NetworkSession;
   /** Libreta local de "Mis salas". Por defecto usa una nueva con localStorage. */
   roomDirectory?: RoomDirectory;
+  /** URL completa del servidor de signaling (ej: "wss://signaling.midominio.com:8787").
+   *  Si no se proporciona, usa location.hostname + puerto 8787 (comportamiento actual). */
+  signalingUrl?: string;
 }
 
 export class ConnectMenu {
@@ -26,6 +29,7 @@ export class ConnectMenu {
   private roomStateListeners = new Set<(state: RoomState) => void>();
   private lastRoomState: RoomState | null = null;
   private readonly createSession: (handlers: SessionHandlers) => NetworkSession;
+  private readonly signalingUrl: string | undefined;
   private currentState: SessionState = 'idle';
 
   private readonly directory: RoomDirectory;
@@ -47,7 +51,8 @@ export class ConnectMenu {
   private readonly errorMsg: HTMLDivElement;
 
   constructor(options: ConnectMenuOptions = {}) {
-    this.createSession = options.createSession ?? ((handlers) => new NetworkSession({ handlers }));
+    this.signalingUrl = options.signalingUrl;
+    this.createSession = options.createSession ?? ((handlers) => new NetworkSession({ handlers, signalingUrl: this.signalingUrl }));
     this.directory = options.roomDirectory ?? new RoomDirectory();
 
     this.createBtn = document.getElementById('create-room-btn') as HTMLButtonElement;

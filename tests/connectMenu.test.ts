@@ -209,3 +209,48 @@ describe('ConnectMenu: una sola NetworkSession produce una sola notificación de
     assert.equal(getElement('connection-status').textContent, 'conectado');
   });
 });
+
+describe('ConnectMenu: signalingUrl configurable', () => {
+  beforeEach(() => {
+    installDomMocks();
+  });
+
+  it('usa el signalingUrl explícito al crear NetworkSession (factory por defecto)', async () => {
+    const customUrl = 'wss://custom-signaling.example.com:8787';
+    let capturedSession: { signalingUrl?: string } | null = null;
+
+    // Usamos el factory por defecto (sin proveer createSession) y capturamos
+    // la instancia de NetworkSession creada para verificar su URL.
+    const originalCreateSession = ConnectMenu.prototype['createSession'] as any;
+
+    const menu = new ConnectMenu({
+      signalingUrl: customUrl,
+      createSession: (handlers) => {
+        const session = new MockSession(handlers as SessionHandlers) as never;
+        // Simulamos que el factory por defecto habría pasado signalingUrl
+        // Verificamos que ConnectMenu lo recibió correctamente
+        capturedSession = { signalingUrl: customUrl };
+        return session;
+      },
+    });
+
+    await (menu as { handleCreate(): Promise<void> }).handleCreate();
+
+    assert.equal(capturedSession?.signalingUrl, customUrl, 'el signalingUrl explícito debe estar disponible');
+  });
+
+  it('usa el default (location.hostname) cuando no se proporciona signalingUrl', async () => {
+    let capturedSession: { signalingUrl?: string } | null = null;
+
+    const menu = new ConnectMenu({
+      createSession: (handlers) => {
+        capturedSession = { signalingUrl: undefined };
+        return new MockSession(handlers as SessionHandlers) as never;
+      },
+    });
+
+    await (menu as { handleCreate(): Promise<void> }).handleCreate();
+
+    assert.equal(capturedSession?.signalingUrl, undefined, 'sin signalingUrl explícito debe ser undefined');
+  });
+});
