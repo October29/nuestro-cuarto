@@ -37,6 +37,9 @@ export class RtcPeerTransport implements NetworkTransport {
   private negotiating = false;
   private renegotiationQueue: Array<() => Promise<void>> = [];
   private processingQueue = false;
+  private localTracks = new Set<MediaStreamTrack>();
+  private senders = new Map<MediaStreamTrack, RTCRtpSender>();
+  private localStream: MediaStream | null = null;
 
   constructor(
     private readonly signaling: SignalingClient,
@@ -76,6 +79,57 @@ export class RtcPeerTransport implements NetworkTransport {
     return true;
   }
 
+  /**
+   * Sincroniza el media local: la conexión WebRTC debe reflejar EXACTAMENTE
+   * esta lista de tracks.
+   *
+   * La sincronización es por identidad de MediaStreamTrack:
+   * - un track ya añadido no se vuelve a añadir (no duplica RTCRtpSender);
+   * - un track que desaparece retira su sender correspondiente;
+   * - es idempotente y segura de llamar en cualquier momento.
+   *
+   * Este transporte NO hace getUserMedia: MediaManager es el dueño de la
+   * captura y cede aquí sus tracks. Añadir/retirar tracks dispara
+   * onnegotiationneeded, que la cola de renegociación existente (B6) procesa;
+   * esta frontera no crea ninguna cola propia.
+   */
+  setLocalMediaTracks(tracks: MediaStreamTrack[]): void {
+    if (this.status === 'closed') return;
+    this.localTracks = new Set(tracks);
+    this.applyLocalMedia();
+  }
+
+  /** Aplica la lista deseada de tracks al PC actual (idempotente por identidad). */
+  private applyLocalMedia(): void {
+    const connection = this.connection;
+    if (!connection || this.status === 'closed') return;
+
+    for (const track of this.localTracks) {
+      if (!this.senders.has(track)) {
+        const sender = connection.addTrack(track, this.localStreamRef());
+        this.senders.set(track, sender);
+      }
+    }
+
+    for (const [track, sender] of [...this.senders]) {
+      if (!this.localTracks.has(track)) {
+        connection.removeTrack(sender);
+        this.senders.delete(track);
+      }
+    }
+  }
+
+  /**
+   * Stream sintético para el argumento stream de addTrack. En entornos sin
+   * MediaStream (tests en Node) se usa un placeholder compatible con los mocks.
+   */
+  private localStreamRef(): MediaStream {
+    if (!this.localStream) {
+      this.localStream = typeof MediaStream !== 'undefined' ? new MediaStream() : ({} as MediaStream);
+    }
+    return this.localStream;
+  }
+
   /** Cierre local: desarma el transporte y limpia todo. */
   close(): void {
     this.status = 'closed';
@@ -84,6 +138,7 @@ export class RtcPeerTransport implements NetworkTransport {
     this.negotiating = false;
     this.renegotiationQueue = [];
     this.processingQueue = false;
+    this.localTracks.clear();
     this.channel = null;
     this.closeConnection();
     this.unsubscribeSignaling?.();
@@ -97,6 +152,9 @@ export class RtcPeerTransport implements NetworkTransport {
     if (this.negotiating || this.status !== 'connecting') return;
 
     this.ensureConnection();
+    // Aplicar tracks locales pendientes antes del offer inicial, para que la
+    // primera negociación ya incluya el media solicitado.
+    this.applyLocalMedia();
     this.negotiating = true;
     this.startNegotiationTimeout();
 
@@ -254,6 +312,9 @@ export class RtcPeerTransport implements NetworkTransport {
       if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
       this.negotiating = false;
+      // Aplicar cualquier media local aún pendiente: en estado 'open' el
+      // negotiationneeded resultante lo procesa la cola B6 existente.
+      this.applyLocalMedia();
       this.handlers.onOpen();
     };
     channel.onmessage = (event) => {
@@ -305,5 +366,9 @@ export class RtcPeerTransport implements NetworkTransport {
       }
       this.connection = null;
     }
+    // Los senders viven sobre el PC; se limpian con él. localTracks (la lista
+    // deseada) se conserva para reaplicarse si llega un nuevo peer.
+    this.senders.clear();
+    this.localStream = null;
   }
 }
