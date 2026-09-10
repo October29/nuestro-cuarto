@@ -176,14 +176,15 @@ En cada pestaña:
 
 ### 3.7 Dos dispositivos distintos (LAN)
 
-`getUserMedia` requiere un contexto seguro (HTTPS, o `localhost`). Para probar con
-dos dispositivos en la misma red SIN configurar TLS, `http://<IP-LAN>:5173` no
-concede permisos (falla con `NotAllowedError`/contexto no seguro). Es una
-limitación conocida de la plataforma, documentada deliberadamente:
+`getUserMedia` requiere un contexto seguro (HTTPS o `localhost`). Desde un
+dispositivo LAN la **app sí se abre** (`http://192.168.1.3:5173` responde
+correctamente desde `milestone-08-lan`, con `server.host: true` en Vite), pero
+**la cámara/micrófono no se concederán** sobre HTTP plano (`NotAllowedError`,
+contexto no seguro). Salas, chat y conexión P2P funcionan sin problema.
 
-- Opción recomendada (sin infraestructura): probar con **dos pestañas del mismo
-  navegador** en `localhost`.
-- Para dos dispositivos reales hace falta HTTPS (p. ej. un túnel tipo
+- Opción recomendada para media real: **dos pestañas del mismo navegador** en
+  `localhost` (contexto seguro) o usar `https` para LAN.
+- Para dispositivos reales con media hace falta HTTPS (p. ej. un túnel tipo
   `ssh -R`/`cloudflared`/`ngrok` con `--host` en Vite, fuera del alcance de este
   milestone) y, si están en redes diferentes, STUN/TURN (también fuera de alcance).
 
