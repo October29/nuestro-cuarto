@@ -10,11 +10,18 @@
 // La captura es perezosa: construir el manager no pide permisos. getUserMedia
 // solo se invoca cuando enableCamera()/enableMic() se llaman.
 //
-// Modelo de slots: cada slot controla únicamente los tracks del kind que
-// solicitó (cámara → video, micrófono → audio). Si un stream compartido/fake
-// trae tracks de otro kind, se adoptan al slot correspondiente para que nunca
-// queden tracks vivos abandonados: quedar registrados, reportables en
-// getActiveTracks() y detenibles con close().
+// Modelo coherente por slots:
+// - cada llamada a getUserMedia es propietaria de su stream;
+// - un slot está activo si su stream posee un track vivo de su kind (cámara →
+//   video, micrófono → audio), y getCameraStream()/getMicStream() devuelven
+//   ese stream mientras el slot esté activo;
+// - getActiveTracks() refleja los tracks vivos de los slots activos;
+// - los tracks de otro kind que aparezcan en un stream compartido/fake no se
+//   detienen al desactivar el slot ni se marcan como captura ajena: su stream
+//   se retiene explícitamente (con el stream de origen) y close() detiene
+//   absolutamente todo lo que el manager haya capturado, sin dejar nada
+//   abandonado. Así no puede existir un estado en que un medio se reporte
+//   activo sin stream, ni viceversa.
 
 export type MediaSourceKind = 'camera' | 'mic';
 
@@ -24,43 +31,41 @@ export interface ActiveLocalTrack {
 }
 
 interface CaptureSlot {
-  /** Stream de origen de la captura de este slot (null si no hay captura). */
   stream: MediaStream | null;
-  /** Solicitud de getUserMedia en vuelo (null si no hay). */
   request: Promise<void> | null;
   version: number;
-  /** Tracks controlados por este slot, únicamente de su own kind. */
-  tracks: MediaStreamTrack[];
 }
 
 export class MediaManager {
-  private camera: CaptureSlot = { stream: null, request: null, version: 0, tracks: [] };
-  private mic: CaptureSlot = { stream: null, request: null, version: 0, tracks: [] };
+  private camera: CaptureSlot = { stream: null, request: null, version: 0 };
+  private mic: CaptureSlot = { stream: null, request: null, version: 0 };
+  /** Streams retenidos con tracks de otro kind (caso defensivo de stream compartido/fake). */
+  private retained: MediaStream[] = [];
   private closed = false;
 
   isCameraEnabled(): boolean {
-    return this.hasLiveTrack(this.camera);
+    return this.slotHasLive(this.camera, 'video');
   }
 
   isMicEnabled(): boolean {
-    return this.hasLiveTrack(this.mic);
+    return this.slotHasLive(this.mic, 'audio');
   }
 
-  /** Stream local de cámara (null si no hay captura activa). */
+  /** Stream de la captura de cámara (null si la cámara no está activa). */
   getCameraStream(): MediaStream | null {
     return this.camera.stream;
   }
 
-  /** Stream local de micrófono (null si no hay captura activa). */
+  /** Stream de la captura de micrófono (null si el micrófono no está activo). */
   getMicStream(): MediaStream | null {
     return this.mic.stream;
   }
 
-  /** Tracks de captura controlados (solo los que siguen vivos). */
+  /** Tracks vivos de las capturas activas (coherente con los streams). */
   getActiveTracks(): ActiveLocalTrack[] {
     const tracks: ActiveLocalTrack[] = [];
-    this.collectLiveTracks(this.camera, 'camera', tracks);
-    this.collectLiveTracks(this.mic, 'mic', tracks);
+    this.collectOwnLive(this.camera, 'video', 'camera', tracks);
+    this.collectOwnLive(this.mic, 'audio', 'mic', tracks);
     return tracks;
   }
 
@@ -74,39 +79,40 @@ export class MediaManager {
     return this.enable(this.mic, 'mic');
   }
 
-  /** Detiene únicamente los tracks de vídeo de la cámara. */
+  /** Detiene únicamente los tracks de vídeo de la captura de cámara. */
   disableCamera(): void {
-    this.disable(this.camera);
+    this.disable(this.camera, 'video');
   }
 
-  /** Detiene únicamente los tracks de audio del micrófono. */
+  /** Detiene únicamente los tracks de audio de la captura de micrófono. */
   disableMic(): void {
-    this.disable(this.mic);
+    this.disable(this.mic, 'audio');
   }
 
-  /** Detiene toda la captura activa y deja el manager en estado limpio. */
+  /** Detiene absolutamente todos los tracks capturados y deja el manager limpio. */
   close(): void {
     if (this.closed) return;
     this.closed = true;
     this.invalidate(this.camera);
     this.invalidate(this.mic);
     for (const slot of [this.camera, this.mic]) {
-      for (const track of slot.tracks) {
-        if (track.readyState !== 'ended') track.stop();
-      }
-      slot.tracks = [];
+      if (slot.stream !== null) this.stopAllTracks(slot.stream);
       slot.stream = null;
     }
+    for (const stream of this.retained) {
+      this.stopAllTracks(stream);
+    }
+    this.retained = [];
   }
 
   private enable(slot: CaptureSlot, kind: MediaSourceKind): Promise<void> {
     this.ensureOpen();
-    if (this.hasLiveTrack(slot)) return Promise.resolve();
+    const ownKind = this.trackKindOf(kind);
+    if (this.slotHasLive(slot, ownKind)) return Promise.resolve();
     if (slot.request !== null) return slot.request;
 
     slot.version += 1;
     const version = slot.version;
-    const ownKind: 'video' | 'audio' = kind === 'camera' ? 'video' : 'audio';
 
     const request: Promise<void> = (async () => {
       try {
@@ -116,19 +122,19 @@ export class MediaManager {
           this.stopAllTracks(stream);
           return;
         }
-        for (const track of stream.getTracks()) {
-          if (track.kind === ownKind) {
-            slot.tracks.push(track);
-          } else {
-            // Track de otro kind en un stream compartido/fake: se adopta al
-            // slot correspondiente para que no quede vivo y abandonado.
-            const target = track.kind === 'video' ? this.camera : this.mic;
-            target.tracks.push(track);
-          }
+        const hasOwnLive = stream.getTracks().some(
+          (track) => track.kind === ownKind && track.readyState === 'live',
+        );
+        if (!hasOwnLive) {
+          // Caso defensivo (p. ej. un fake con puro stream del kind contrario):
+          // el slot no se marca activo, pero el stream se retiene con su stream
+          // de origen para que close() detenga cualquier track vivo que tenga.
+          if (stream.getTracks().length > 0) this.retain(stream);
+          return;
         }
         slot.stream = stream;
       } catch (error) {
-        // Estado consistente: el slot sigue vacío.
+        // Estado consistente: el slot sigue sin captura.
         // Solo propagar si esta solicitud sigue vigente.
         if (slot.version === version) throw error;
       }
@@ -147,14 +153,18 @@ export class MediaManager {
     return request;
   }
 
-  private disable(slot: CaptureSlot): void {
+  private disable(slot: CaptureSlot, ownKind: 'video' | 'audio'): void {
     this.invalidate(slot);
-    // El slot solo contiene tracks de su propio kind, así que detenerlos todos
-    // no afecta a tracks de otro kind (ya adoptados por el otro slot).
-    for (const track of slot.tracks) {
-      if (track.readyState !== 'ended') track.stop();
+    if (slot.stream === null) return;
+    for (const track of slot.stream.getTracks()) {
+      if (track.kind === ownKind) track.stop();
     }
-    slot.tracks = [];
+    // Si el stream todavía tiene tracks vivos de otro kind (caso compartido/
+    // fake), se retiene con su stream de origen en lugar de abandonarlo,
+    // para que close() lo detenga.
+    if (slot.stream.getTracks().some((track) => track.kind !== ownKind && track.readyState === 'live')) {
+      this.retain(slot.stream);
+    }
     slot.stream = null;
   }
 
@@ -170,13 +180,34 @@ export class MediaManager {
     return navigator.mediaDevices.getUserMedia(constraints);
   }
 
-  private hasLiveTrack(slot: CaptureSlot): boolean {
-    return slot.tracks.some((track) => track.readyState === 'live');
+  private trackKindOf(kind: MediaSourceKind): 'video' | 'audio' {
+    return kind === 'camera' ? 'video' : 'audio';
   }
 
-  private collectLiveTracks(slot: CaptureSlot, kind: MediaSourceKind, out: ActiveLocalTrack[]): void {
-    for (const track of slot.tracks) {
-      if (track.readyState === 'live') out.push({ kind, track });
+  private slotHasLive(slot: CaptureSlot, kindOf: 'video' | 'audio'): boolean {
+    return (
+      slot.stream !== null &&
+      slot.stream.getTracks().some((track) => track.kind === kindOf && track.readyState === 'live')
+    );
+  }
+
+  private collectOwnLive(
+    slot: CaptureSlot,
+    kindOf: 'video' | 'audio',
+    sourceKind: MediaSourceKind,
+    out: ActiveLocalTrack[],
+  ): void {
+    if (slot.stream === null) return;
+    for (const track of slot.stream.getTracks()) {
+      if (track.kind === kindOf && track.readyState === 'live') {
+        out.push({ kind: sourceKind, track });
+      }
+    }
+  }
+
+  private retain(stream: MediaStream): void {
+    if (!this.retained.some((entry) => entry === stream)) {
+      this.retained.push(stream);
     }
   }
 
