@@ -4,6 +4,7 @@ import { gameConfig } from './game/config';
 import { RoomScene } from './game/scenes/RoomScene';
 import { ConnectMenu } from './ui/connectMenu';
 import { ChatPanel } from './ui/chatPanel';
+import { MediaPanel } from './ui/mediaPanel';
 import { RoomNamePanel } from './ui/roomNamePanel';
 import { RoomEditPanel } from './ui/roomEditPanel';
 import type { RoomState } from './network/protocol';
@@ -15,6 +16,7 @@ const chatPanel = new ChatPanel();
 const roomNamePanel = new RoomNamePanel();
 const roomEditPanel = new RoomEditPanel();
 const connectMenu = new ConnectMenu();
+const mediaPanel = new MediaPanel();
 
 connectMenu.setMessageCallback((message) => {
   chatPanel.onRemoteMessage(message);
@@ -36,6 +38,7 @@ connectMenu.onSessionChange((session) => {
   }
   getRoomScene()?.setNetworkSession(session);
   roomEditPanel.bindRoomScene(getRoomScene(), session);
+  mediaPanel.bindSession(session);
 });
 
 connectMenu.onRoomStateChange((state: RoomState) => {

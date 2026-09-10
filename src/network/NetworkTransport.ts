@@ -27,4 +27,16 @@ export interface NetworkTransport {
   send(message: PeerMessage): boolean;
   /** Cierra la conexión localmente. */
   close(): void;
+  /**
+   * Opcional (media local): sincroniza la lista de tracks locales con el
+   * transporte. Solo los transportes WebRTC con media lo implementan.
+   * Se ignora en transportes mock o sin soporte de media.
+   */
+  setLocalMediaTracks?(tracks: MediaStreamTrack[]): void;
+  /**
+   * Opcional (media remota): callback para cada track remoto recibido vía
+   * RTCPeerConnection.ontrack, con los MediaStream asociados. Solo los
+   * transportes WebRTC con media lo asignan.
+   */
+  onRemoteTrack?: ((track: MediaStreamTrack, streams: readonly MediaStream[]) => void) | null;
 }

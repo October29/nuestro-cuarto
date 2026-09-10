@@ -95,6 +95,17 @@
           <button id="chat-send-btn" type="button">Enviar</button>
         </div>
       </div>
+
+      <div id="media-panel">
+        <video id="remote-video" autoplay playsinline muted></video>
+        <video id="local-video" autoplay playsinline muted></video>
+        <div class="media-controls">
+          <button id="mic-btn" type="button" disabled>🎤 Micrófono desactivado</button>
+          <button id="camera-btn" type="button" disabled>📷 Cámara desactivada</button>
+          <button id="audio-unlock-btn" type="button" hidden>🔊 Activar audio</button>
+        </div>
+        <div id="media-status" class="media-hint">Únete o crea una sala para usar cámara y micrófono.</div>
+      </div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

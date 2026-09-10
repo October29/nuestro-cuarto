@@ -60,6 +60,13 @@ export class NetworkSession {
   private unsubscribeSignaling: (() => void) | null = null;
   private peerPresent = false;
 
+  /**
+   * Callback de media remota: cada track que el peer publica se propaga aquí
+   * desde el transporte. Lo asigna la capa superior (MediaPanel / UI); null
+   * significa no consumir media remota.
+   */
+  onRemoteTrack: ((track: MediaStreamTrack, streams: readonly MediaStream[]) => void) | null = null;
+
   /** Instrumentación temporal M07-A: id de diagnóstico de esta instancia. */
   readonly diagId = ++nextDiagId;
 
@@ -117,6 +124,7 @@ export class NetworkSession {
       this.status = 'connected';
       this.handlers.onRoomCreated?.(code);
       this.transport = this.makeTransport(this.signaling, this.transportHandlers());
+      this.wireTransportMedia();
       await this.transport.connect();
       diagLog('NetworkSession createRoom resolvió', { diagId: this.diagId, roomCode: code });
       return code;
@@ -138,6 +146,7 @@ export class NetworkSession {
       this.status = 'connected';
       this.handlers.onRoomCreated?.(roomCode);
       this.transport = this.makeTransport(this.signaling, this.transportHandlers());
+      this.wireTransportMedia();
       await this.transport.connect();
       diagLog('NetworkSession joinRoom resolvió', { diagId: this.diagId, roomCode });
     } catch (error) {
@@ -150,6 +159,16 @@ export class NetworkSession {
   send(message: PeerMessage): boolean {
     if (this.status !== 'connected' || !this.transport) return false;
     return this.transport.send(message);
+  }
+
+  /**
+   * Publica o retira los tracks de media local hacia el peer: la conexión
+   * WebRTC debe reflejar exactamente esta lista. Los cambios disparan la
+   * renegociación mediante la cola existente del transporte (B6/B9).
+   * No hace captura: MediaManager es el dueño de los tracks.
+   */
+  setLocalMediaTracks(tracks: MediaStreamTrack[]): void {
+    this.transport?.setLocalMediaTracks?.(tracks);
   }
 
   /**
@@ -229,7 +248,17 @@ export class NetworkSession {
     this.unsubscribeSignaling?.();
     this.unsubscribeSignaling = null;
     this.peerPresent = false;
+    this.onRemoteTrack = null;
     this.status = 'disconnected';
+  }
+
+  /**
+   * Conecta la media remota del transporte (ontrack → onRemoteTrack público)
+   * cuando el transporte lo soporta. Los transportes sin media se ignoran.
+   */
+  private wireTransportMedia(): void {
+    if (!this.transport) return;
+    this.transport.onRemoteTrack = (track, streams) => this.onRemoteTrack?.(track, streams);
   }
 
   private ensureIdle(): void {

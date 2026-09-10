@@ -26,6 +26,12 @@ export interface DomStub {
   blurCount: number;
   listeners: Record<string, Listener[]>;
   type: string;
+  srcObject: unknown;
+  autoplay: boolean;
+  playsInline: boolean;
+  muted: boolean;
+  play: () => Promise<void>;
+  pause: () => void;
 }
 
 export interface ElementStub {
@@ -59,6 +65,12 @@ export function makeDomStub(tagName: string): DomStub {
     scrollHeight: 0,
     children: [],
     type: 'button',
+    srcObject: null,
+    autoplay: false,
+    playsInline: false,
+    muted: false,
+    play: () => Promise.resolve(),
+    pause: () => undefined,
     appendChild: () => undefined,
     focusCount: 0,
     blurCount: 0,
@@ -103,6 +115,13 @@ const TAG_BY_ID: Record<string, string> = {
   'chat-input': 'INPUT',
   'chat-send-btn': 'BUTTON',
   game: 'DIV',
+  'media-panel': 'DIV',
+  'remote-video': 'VIDEO',
+  'local-video': 'VIDEO',
+  'camera-btn': 'BUTTON',
+  'mic-btn': 'BUTTON',
+  'audio-unlock-btn': 'BUTTON',
+  'media-status': 'DIV',
 };
 
 export function installDomMocks(): void {
@@ -123,6 +142,13 @@ export function installDomMocks(): void {
     'chat-input',
     'chat-send-btn',
     'game',
+    'media-panel',
+    'remote-video',
+    'local-video',
+    'camera-btn',
+    'mic-btn',
+    'audio-unlock-btn',
+    'media-status',
   ];
   for (const id of ids) {
     elements[id] = makeDomStub(TAG_BY_ID[id]);
