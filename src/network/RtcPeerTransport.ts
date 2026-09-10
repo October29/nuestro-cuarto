@@ -41,6 +41,14 @@ export class RtcPeerTransport implements NetworkTransport {
   private senders = new Map<MediaStreamTrack, RTCRtpSender>();
   private localStream: MediaStream | null = null;
 
+  /**
+   * Callback que recibe cada track remoto publicado por el peer, con los
+   * MediaStream asociados que el runtime entregue en el evento track.
+   * Se asigna externamente (capas superiores); null significa no consumir
+   * media remota. No se reproduce ni se captura nada aquí.
+   */
+  onRemoteTrack: ((track: MediaStreamTrack, streams: readonly MediaStream[]) => void) | null = null;
+
   constructor(
     private readonly signaling: SignalingClient,
     private readonly handlers: TransportHandlers,
@@ -130,6 +138,16 @@ export class RtcPeerTransport implements NetworkTransport {
     return this.localStream;
   }
 
+  /**
+   * Notifica un track remoto recibido vía ontrack. Exactamente una
+   * notificación por evento track; se entregan los MediaStream asociados.
+   * Tras cerrar el transporte, los eventos pendientes se descartan.
+   */
+  private notifyRemoteTrack(track: MediaStreamTrack, streams: readonly MediaStream[]): void {
+    if (this.status === 'closed') return;
+    this.onRemoteTrack?.(track, streams);
+  }
+
   /** Cierre local: desarma el transporte y limpia todo. */
   close(): void {
     this.status = 'closed';
@@ -197,6 +215,11 @@ export class RtcPeerTransport implements NetworkTransport {
       if (this.status === 'open') {
         this.renegotiate();
       }
+    };
+    // Los tracks remotos llegan vía ontrack en cada offer/answer (incluida la
+    // renegociación). Se notifican una vez por evento; nada se reproduce aquí.
+    this.connection.ontrack = (event) => {
+      this.notifyRemoteTrack(event.track, event.streams);
     };
   }
 
@@ -359,6 +382,10 @@ export class RtcPeerTransport implements NetworkTransport {
 
   private closeConnection(): void {
     if (this.connection) {
+      // Desconectar los handlers del PC antes de cerrarlo: los eventos que
+      // quedaran pendientes (p.ej. ontrack) no deben notificar a las capas
+      // superiores tras un cierre.
+      this.connection.ontrack = null;
       try {
         this.connection.close();
       } catch {
